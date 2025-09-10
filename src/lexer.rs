@@ -1,8 +1,8 @@
 use phf::phf_map;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Token<'a> {
-    Invalid(&'a str),
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    Invalid(String),
 
     OpenParen,
     CloseParen,
@@ -31,9 +31,9 @@ pub enum Token<'a> {
     Greater,
     GreaterEqual,
 
-    Number(&'a str),
-    Identifier(&'a str),
-    String(&'a str),
+    Number(f64),
+    Identifier(String),
+    String(String),
 
     Var,
     Nil,
@@ -87,11 +87,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn invalid(&self) -> Token<'a> {
-        Token::Invalid(&self.src[self.start_index..self.current_index])
+    fn invalid(&self) -> Token {
+        Token::Invalid(self.src[self.start_index..self.current_index].to_string())
     }
 
-    fn char_equal_token(&mut self, one_char: Token<'a>, two_char: Token<'a>) -> Option<Token<'a>> {
+    fn char_equal_token(&mut self, one_char: Token, two_char: Token) -> Option<Token> {
         if self.matches('=') {
             Some(two_char)
         } else {
@@ -99,7 +99,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn identifier(&mut self, curr: char) -> Option<Token<'a>> {
+    fn identifier(&mut self, curr: char) -> Option<Token> {
         if !curr.is_alphanumeric() && curr != '_' {
             return Some(self.invalid());
         }
@@ -116,16 +116,16 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if let Some(&keyword) = KEYWORDS.get(&self.src[self.start_index..self.current_index]) {
-            Some(keyword)
+        if let Some(keyword) = KEYWORDS.get(&self.src[self.start_index..self.current_index]) {
+            Some(keyword.clone())
         } else {
             Some(Token::Identifier(
-                &self.src[self.start_index..self.current_index],
+                self.src[self.start_index..self.current_index].to_string(),
             ))
         }
     }
 
-    fn number(&mut self) -> Option<Token<'a>> {
+    fn number(&mut self) -> Option<Token> {
         while self.peek().unwrap_or('\0').is_digit(10) {
             self.advance();
         }
@@ -138,12 +138,14 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        Some(Token::Number(
-            &self.src[self.start_index..self.current_index],
-        ))
+        let str = &self.src[self.start_index..self.current_index];
+        // TODO: Handle errors
+        let number = str.parse::<f64>().unwrap();
+
+        Some(Token::Number(number))
     }
 
-    fn string(&mut self) -> Option<Token<'a>> {
+    fn string(&mut self) -> Option<Token> {
         loop {
             if let Some(c) = self.peek() {
                 match c {
@@ -163,7 +165,7 @@ impl<'a> Lexer<'a> {
         }
 
         Some(Token::String(
-            &self.src[self.start_index + 1..self.current_index - 1],
+            self.src[self.start_index + 1..self.current_index - 1].to_string(),
         ))
     }
 
@@ -250,7 +252,7 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Token<'a>;
+    type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
@@ -311,7 +313,7 @@ mod tests {
             Token::Plus,
             Token::Minus,
             Token::Asterisk,
-            Token::Invalid("!"),
+            Token::Invalid("!".to_string()),
             Token::BangEqual,
             Token::EqualEqual,
             Token::Equal,
@@ -348,11 +350,11 @@ end
         let found = lexer.collect_vec();
 
         let expected = vec![
-            Token::Identifier("space"),
-            Token::Identifier("tabs"),
-            Token::Identifier("newlines"),
-            Token::Identifier("comments"),
-            Token::Identifier("end"),
+            Token::Identifier("space".to_string()),
+            Token::Identifier("tabs".to_string()),
+            Token::Identifier("newlines".to_string()),
+            Token::Identifier("comments".to_string()),
+            Token::Identifier("end".to_string()),
         ];
 
         assert_eq!(found, expected);
@@ -364,11 +366,11 @@ end
         let found = lexer.collect_vec();
 
         let expected = vec![
-            Token::Number("123"),
-            Token::Number("123.456"),
+            Token::Number(123.0),
+            Token::Number(123.456),
             Token::Dot,
-            Token::Number("456"),
-            Token::Number("123"),
+            Token::Number(456.0),
+            Token::Number(123.0),
             Token::Dot,
         ];
 
@@ -386,14 +388,16 @@ abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_
         let found = lexer.collect_vec();
 
         let expected = vec![
-            Token::Identifier("andy"),
-            Token::Identifier("formless"),
-            Token::Identifier("fo"),
-            Token::Identifier("_"),
-            Token::Identifier("_123"),
-            Token::Identifier("_abc"),
-            Token::Identifier("ab123"),
-            Token::Identifier("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_"),
+            Token::Identifier("andy".to_string()),
+            Token::Identifier("formless".to_string()),
+            Token::Identifier("fo".to_string()),
+            Token::Identifier("_".to_string()),
+            Token::Identifier("_123".to_string()),
+            Token::Identifier("_abc".to_string()),
+            Token::Identifier("ab123".to_string()),
+            Token::Identifier(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_".to_string(),
+            ),
         ];
 
         assert_eq!(found, expected);
@@ -441,10 +445,10 @@ and struct else false for fun if nil not or return super this true var while
         let found = lexer.collect_vec();
 
         let expected = vec![
-            Token::String(""),
-            Token::String("string"),
-            Token::String("string \\\"with escaped quotes\\\""),
-            Token::Invalid("\"unfinished string"),
+            Token::String("".to_string()),
+            Token::String("string".to_string()),
+            Token::String("string \\\"with escaped quotes\\\"".to_string()),
+            Token::Invalid("\"unfinished string".to_string()),
         ];
 
         assert_eq!(found, expected);
@@ -457,20 +461,20 @@ and struct else false for fun if nil not or return super this true var while
         let found = lexer.collect_vec();
 
         let expected = vec![
-            Token::Identifier("π"),
-            Token::Identifier("Hello"),
+            Token::Identifier("π".to_string()),
+            Token::Identifier("Hello".to_string()),
             Token::Comma,
-            Token::Identifier("World"),
+            Token::Identifier("World".to_string()),
             Token::If,
             Token::For,
-            Token::Identifier("While"),
+            Token::Identifier("While".to_string()),
             Token::While,
             Token::True,
             Token::False,
             Token::Semicolon,
-            Token::Number("1337"),
-            Token::Number("42"),
-            Token::Number("893.17"),
+            Token::Number(1337.0),
+            Token::Number(42.0),
+            Token::Number(893.17),
         ];
 
         assert_eq!(found, expected);

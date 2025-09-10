@@ -32,22 +32,19 @@
 
 use crate::lexer::{Lexer, Token};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum BinaryOp {
-    Add,
-    Substract,
-    Multiply,
-    Divide,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Binary {
         left: Box<Expr>,
         right: Box<Expr>,
-        op: BinaryOp,
+        op: Token,
     },
-    Number(f32),
+    Unary {
+        right: Box<Expr>,
+        op: Token,
+    },
+    Number(f64),
+    Boolean(bool),
 }
 
 struct Program {
@@ -57,16 +54,16 @@ struct Program {
 pub struct Parser<'a> {
     lexer: &'a mut Lexer<'a>,
 
-    current_token: Token<'a>,
-    prev_token: Token<'a>,
+    current_token: Token,
+    prev_token: Token,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(lexer: &'a mut Lexer<'a>) -> Self {
         Self {
             lexer,
-            current_token: Token::Invalid("Not-initialized"),
-            prev_token: Token::Invalid("Not-initialized"),
+            current_token: Token::Invalid(String::from("Not-initialized")),
+            prev_token: Token::Invalid(String::from("Not-initialized")),
         }
     }
 
@@ -121,11 +118,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.factor();
 
         while self.matches(Token::Minus) || self.matches(Token::Plus) {
-            let op = match self.prev_token {
-                Token::Minus => BinaryOp::Substract,
-                Token::Plus => BinaryOp::Add,
-                _ => unreachable!(),
-            };
+            let op = self.prev_token.clone();
 
             let right = self.factor();
 
@@ -139,18 +132,12 @@ impl<'a> Parser<'a> {
 
     // factor       -> unary ( ( "/" | "*" ) unary )* ;
     fn factor(&mut self) -> Box<Expr> {
-        // TODO: unary
-        let mut expr = self.primary();
+        let mut expr = self.unary();
 
         while self.matches(Token::Asterisk) || self.matches(Token::Slash) {
-            let op = match self.prev_token {
-                Token::Asterisk => BinaryOp::Multiply,
-                Token::Slash => BinaryOp::Divide,
-                _ => unreachable!(),
-            };
+            let op = self.prev_token.clone();
 
-            // TODO: unary
-            let right = self.primary();
+            let right = self.unary();
 
             let left = expr;
 
@@ -163,7 +150,15 @@ impl<'a> Parser<'a> {
     // unary        -> ("not" | "-") unary
     //               | call ;
     fn unary(&mut self) -> Box<Expr> {
-        todo!();
+        if self.matches(Token::Minus) || self.matches(Token::Not) {
+            let op = self.prev_token.clone();
+
+            let right = self.unary();
+
+            return Box::new(Expr::Unary { right, op });
+        }
+
+        return self.primary();
     }
 
     // call         -> primary ( "(" arguments? ")" "* ;
@@ -180,15 +175,23 @@ impl<'a> Parser<'a> {
     //               | "(" expression ")" | IDENTIFIER;
     fn primary(&mut self) -> Box<Expr> {
         match self.current_token {
-            Token::Number(str) => {
+            Token::Number(n) => {
                 self.advance();
-                return Box::new(Expr::Number(str.parse::<f32>().unwrap()));
+                return Box::new(Expr::Number(n));
+            }
+            Token::True => {
+                self.advance();
+                return Box::new(Expr::Boolean(true));
+            }
+            Token::False => {
+                self.advance();
+                return Box::new(Expr::Boolean(false));
             }
             _ => unreachable!("Invalid token type"),
         }
     }
 
-    fn matches(&mut self, token: Token<'a>) -> bool {
+    fn matches(&mut self, token: Token) -> bool {
         if variant_eq(&self.current_token, &token) {
             self.advance();
             return true;
@@ -197,11 +200,11 @@ impl<'a> Parser<'a> {
         return false;
     }
 
-    fn check(&self, token: Token<'a>) -> bool {
+    fn check(&self, token: Token) -> bool {
         return variant_eq(&self.current_token, &token);
     }
 
-    fn expect(&mut self, expected: Token<'a>) -> Token<'a> {
+    fn expect(&mut self, expected: Token) -> Token {
         if variant_eq(&self.current_token, &expected) {
             return self.advance();
         }
@@ -214,17 +217,17 @@ impl<'a> Parser<'a> {
         unreachable!();
     }
 
-    fn advance(&mut self) -> Token<'a> {
+    fn advance(&mut self) -> Token {
         match self.lexer.next() {
             Some(token) => {
-                self.prev_token = self.current_token;
+                self.prev_token = self.current_token.clone();
                 self.current_token = token;
             }
 
             None => {}
         }
 
-        return self.prev_token;
+        return self.prev_token.clone();
     }
 }
 
@@ -236,75 +239,80 @@ fn variant_eq<T>(a: &T, b: &T) -> bool {
 mod tests {
     use super::*;
 
+    fn test_expression(input: &str, expected: Box<Expr>) {
+        let mut lexer = Lexer::new(input);
+        let mut parser = Parser::new(&mut lexer);
+
+        parser.advance();
+        let expr = parser.expression();
+
+        assert_eq!(expr, expected);
+    }
+
     #[test]
-    fn expression() {
-        // 42
-        let mut lexer = Lexer::new("42");
-        let mut parser = Parser::new(&mut lexer);
+    fn primary_expressions() {
+        test_expression("42", Box::new(Expr::Number(42.0)));
+        test_expression("true", Box::new(Expr::Boolean(true)));
+    }
 
-        parser.advance();
-        let expr = parser.expression();
+    #[test]
+    fn unary_expressions() {
+        test_expression(
+            "-42",
+            Box::new(Expr::Unary {
+                right: Box::new(Expr::Number(42.0)),
+                op: Token::Minus,
+            }),
+        );
 
-        assert_eq!(expr, Box::new(Expr::Number(42.0)));
+        test_expression(
+            "not false",
+            Box::new(Expr::Unary {
+                right: Box::new(Expr::Boolean(false)),
+                op: Token::Not,
+            }),
+        );
+    }
 
-        // 1 + 2
-        let mut lexer = Lexer::new("1 + 2");
-        let mut parser = Parser::new(&mut lexer);
-
-        parser.advance();
-        let expr = parser.expression();
-
-        assert_eq!(
-            expr,
+    #[test]
+    fn binary_expressions() {
+        test_expression(
+            "1 + 2",
             Box::new(Expr::Binary {
                 left: Box::new(Expr::Number(1.0)),
                 right: Box::new(Expr::Number(2.0)),
-                op: BinaryOp::Add
-            })
+                op: Token::Plus,
+            }),
         );
 
-        // 2 * 3
-        let mut lexer = Lexer::new("2 * 3");
-        let mut parser = Parser::new(&mut lexer);
-
-        parser.advance();
-        let expr = parser.expression();
-
-        assert_eq!(
-            expr,
+        test_expression(
+            "2 * 3",
             Box::new(Expr::Binary {
                 left: Box::new(Expr::Number(2.0)),
                 right: Box::new(Expr::Number(3.0)),
-                op: BinaryOp::Multiply
-            })
+                op: Token::Asterisk,
+            }),
         );
 
-        // 2 + 1 * 4 - 5 / 2
-        let mut lexer = Lexer::new("2 + 1 * 4 - 5 / 2");
-        let mut parser = Parser::new(&mut lexer);
-
-        parser.advance();
-        let expr = parser.expression();
-
-        assert_eq!(
-            expr,
+        test_expression(
+            "2 + 1 * 4 - 5 / 2",
             Box::new(Expr::Binary {
                 left: Box::new(Expr::Binary {
                     left: Box::new(Expr::Number(2.0)),
                     right: Box::new(Expr::Binary {
                         left: Box::new(Expr::Number(1.0)),
                         right: Box::new(Expr::Number(4.0)),
-                        op: BinaryOp::Multiply
+                        op: Token::Asterisk,
                     }),
-                    op: BinaryOp::Add
+                    op: Token::Plus,
                 }),
                 right: Box::new(Expr::Binary {
                     left: Box::new(Expr::Number(5.0)),
                     right: Box::new(Expr::Number(2.0)),
-                    op: BinaryOp::Divide
+                    op: Token::Slash,
                 }),
-                op: BinaryOp::Substract
-            })
+                op: Token::Minus,
+            }),
         );
     }
 }
