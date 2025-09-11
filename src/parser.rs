@@ -76,7 +76,7 @@ impl<'a> Parser<'a> {
 
     // expression   -> assignment ;
     fn expression(&mut self) -> Box<Expr> {
-        return self.term();
+        return self.logic_or();
         // return self.assignement();
     }
 
@@ -89,28 +89,73 @@ impl<'a> Parser<'a> {
 
     // logic_or     -> logic_and ( "or" logic_and )* ;
     fn logic_or(&mut self) -> Box<Expr> {
-        let expr = self.logic_and();
+        let mut expr = self.logic_and();
+
+        while self.matches(Token::Or) {
+            let op = self.prev_token.clone();
+
+            let right = self.logic_and();
+
+            let left = expr;
+
+            expr = Box::new(Expr::Binary { left, right, op });
+        }
 
         return expr;
     }
 
     // logic_and    -> equality ( "and" equality )* ;
     fn logic_and(&mut self) -> Box<Expr> {
-        let expr = self.equality();
+        let mut expr = self.equality();
+
+        while self.matches(Token::And) {
+            let op = self.prev_token.clone();
+
+            let right = self.logic_and();
+
+            let left = expr;
+
+            expr = Box::new(Expr::Binary { left, right, op });
+        }
 
         return expr;
     }
 
     // equality     -> comparison ( ( "!=" | "==" ) comparison )* ;
     fn equality(&mut self) -> Box<Expr> {
-        let expr = self.comparison();
+        let mut expr = self.comparison();
+
+        while self.matches_any(&[Token::BangEqual, Token::EqualEqual]) {
+            let op = self.prev_token.clone();
+
+            let right = self.factor();
+
+            let left = expr;
+
+            expr = Box::new(Expr::Binary { left, right, op });
+        }
 
         return expr;
     }
 
     // comparison   -> term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
     fn comparison(&mut self) -> Box<Expr> {
-        let expr = self.term();
+        let mut expr = self.term();
+
+        while self.matches_any(&[
+            Token::Greater,
+            Token::GreaterEqual,
+            Token::Less,
+            Token::LessEqual,
+        ]) {
+            let op = self.prev_token.clone();
+
+            let right = self.factor();
+
+            let left = expr;
+
+            expr = Box::new(Expr::Binary { left, right, op });
+        }
 
         return expr;
     }
@@ -287,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_expressions() {
+    fn term_expressions() {
         test_expression(
             "1 + 2",
             Box::new(Expr::Binary {
@@ -298,6 +343,18 @@ mod tests {
         );
 
         test_expression(
+            "4.2 - 13.37",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Number(4.2)),
+                right: Box::new(Expr::Number(13.37)),
+                op: Token::Minus,
+            }),
+        );
+    }
+
+    #[test]
+    fn factor_expressions() {
+        test_expression(
             "2 * 3",
             Box::new(Expr::Binary {
                 left: Box::new(Expr::Number(2.0)),
@@ -307,23 +364,95 @@ mod tests {
         );
 
         test_expression(
-            "2 + 1 * 4 - 5 / 2",
+            "7 / 4",
             Box::new(Expr::Binary {
-                left: Box::new(Expr::Binary {
-                    left: Box::new(Expr::Number(2.0)),
-                    right: Box::new(Expr::Binary {
-                        left: Box::new(Expr::Number(1.0)),
-                        right: Box::new(Expr::Number(4.0)),
-                        op: Token::Asterisk,
-                    }),
-                    op: Token::Plus,
-                }),
-                right: Box::new(Expr::Binary {
-                    left: Box::new(Expr::Number(5.0)),
-                    right: Box::new(Expr::Number(2.0)),
-                    op: Token::Slash,
-                }),
-                op: Token::Minus,
+                left: Box::new(Expr::Number(7.0)),
+                right: Box::new(Expr::Number(4.0)),
+                op: Token::Slash,
+            }),
+        );
+    }
+
+    #[test]
+    fn logic_or_expressions() {
+        test_expression(
+            "true or false",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Boolean(true)),
+                right: Box::new(Expr::Boolean(false)),
+                op: Token::Or,
+            }),
+        );
+    }
+
+    #[test]
+    fn logic_and_expressions() {
+        test_expression(
+            "false and true",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Boolean(false)),
+                right: Box::new(Expr::Boolean(true)),
+                op: Token::And,
+            }),
+        );
+    }
+
+    #[test]
+    fn equality_expressions() {
+        test_expression(
+            "33.0 == false",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Number(33.0)),
+                right: Box::new(Expr::Boolean(false)),
+                op: Token::EqualEqual,
+            }),
+        );
+
+        test_expression(
+            "\"hello\" != \"test\"",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::String("hello".into())),
+                right: Box::new(Expr::String("test".into())),
+                op: Token::BangEqual,
+            }),
+        );
+    }
+
+    #[test]
+    fn comparison_expressions() {
+        test_expression(
+            "42 > 33",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Number(42.0)),
+                right: Box::new(Expr::Number(33.0)),
+                op: Token::Greater,
+            }),
+        );
+
+        test_expression(
+            "42 >= 33",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Number(42.0)),
+                right: Box::new(Expr::Number(33.0)),
+                op: Token::GreaterEqual,
+            }),
+        );
+
+        test_expression(
+            "42 < 33",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Number(42.0)),
+                right: Box::new(Expr::Number(33.0)),
+                op: Token::Less,
+            }),
+        );
+
+        test_expression(
+            "42 <= 33",
+            Box::new(Expr::Binary {
+                left: Box::new(Expr::Number(42.0)),
+                right: Box::new(Expr::Number(33.0)),
+                op: Token::LessEqual,
             }),
         );
     }
