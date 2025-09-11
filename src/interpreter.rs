@@ -33,6 +33,8 @@ fn binary_expr(lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Token) -> Value {
         Token::Minus => substract(lhs, rhs),
         Token::Asterisk => multiply(lhs, rhs),
         Token::Slash => divide(lhs, rhs),
+        Token::Or => or(lhs, rhs),
+        Token::And => and(lhs, rhs),
         _ => unreachable!(),
     }
 }
@@ -74,6 +76,46 @@ fn divide(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs / rhs),
         _ => unreachable!(),
+    }
+}
+
+fn and(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+
+    if let Value::Boolean(lhs) = lhs {
+        if !lhs {
+            return Value::Boolean(false);
+        }
+
+        let rhs = interpret_expr(rhs);
+
+        if let Value::Boolean(rhs) = rhs {
+            Value::Boolean(lhs && rhs)
+        } else {
+            unreachable!()
+        }
+    } else {
+        unreachable!();
+    }
+}
+
+fn or(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+
+    if let Value::Boolean(lhs) = lhs {
+        if lhs {
+            return Value::Boolean(true);
+        }
+
+        let rhs = interpret_expr(rhs);
+
+        if let Value::Boolean(rhs) = rhs {
+            Value::Boolean(lhs || rhs)
+        } else {
+            unreachable!()
+        }
+    } else {
+        unreachable!();
     }
 }
 
@@ -142,5 +184,14 @@ mod tests {
         test_eval_expression("336 / 8", Value::Number(42.0));
 
         test_eval_expression("3 + 5 * 4 - 12 / 2", Value::Number(17.0));
+    }
+
+    #[test]
+    fn binary_logic() {
+        test_eval_expression("true and false", Value::Boolean(false));
+        test_eval_expression("false and 42.0", Value::Boolean(false));
+
+        test_eval_expression("true or 1337", Value::Boolean(true));
+        test_eval_expression("false or true", Value::Boolean(true));
     }
 }
