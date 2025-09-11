@@ -45,6 +45,8 @@ pub enum Expr {
     },
     Number(f64),
     Boolean(bool),
+    // TODO: Proper string memory management
+    String(String),
 }
 
 struct Program {
@@ -174,21 +176,17 @@ impl<'a> Parser<'a> {
     // primary      -> NUMBER | STRING | "true" | "false" | "nil"
     //               | "(" expression ")" | IDENTIFIER;
     fn primary(&mut self) -> Box<Expr> {
-        match self.current_token {
-            Token::Number(n) => {
-                self.advance();
-                return Box::new(Expr::Number(n));
-            }
-            Token::True => {
-                self.advance();
-                return Box::new(Expr::Boolean(true));
-            }
-            Token::False => {
-                self.advance();
-                return Box::new(Expr::Boolean(false));
-            }
+        let expr = match self.current_token {
+            Token::Number(n) => Box::new(Expr::Number(n)),
+            Token::True => Box::new(Expr::Boolean(true)),
+            Token::False => Box::new(Expr::Boolean(false)),
+            Token::String(ref s) => Box::new(Expr::String(s.clone())),
             _ => unreachable!("Invalid token type"),
-        }
+        };
+
+        self.advance();
+
+        return expr;
     }
 
     fn matches(&mut self, token: Token) -> bool {
@@ -253,6 +251,10 @@ mod tests {
     fn primary_expressions() {
         test_expression("42", Box::new(Expr::Number(42.0)));
         test_expression("true", Box::new(Expr::Boolean(true)));
+        test_expression(
+            "\"hello, world\"",
+            Box::new(Expr::String("hello, world".into())),
+        );
     }
 
     #[test]
