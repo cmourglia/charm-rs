@@ -119,7 +119,7 @@ impl<'a> Parser<'a> {
     fn term(&mut self) -> Box<Expr> {
         let mut expr = self.factor();
 
-        while self.matches(Token::Minus) || self.matches(Token::Plus) {
+        while self.matches_any(&[Token::Minus, Token::Plus]) {
             let op = self.prev_token.clone();
 
             let right = self.factor();
@@ -136,7 +136,7 @@ impl<'a> Parser<'a> {
     fn factor(&mut self) -> Box<Expr> {
         let mut expr = self.unary();
 
-        while self.matches(Token::Asterisk) || self.matches(Token::Slash) {
+        while self.matches_any(&[Token::Asterisk, Token::Slash]) {
             let op = self.prev_token.clone();
 
             let right = self.unary();
@@ -152,7 +152,7 @@ impl<'a> Parser<'a> {
     // unary        -> ("not" | "-") unary
     //               | call ;
     fn unary(&mut self) -> Box<Expr> {
-        if self.matches(Token::Minus) || self.matches(Token::Not) {
+        if self.matches_any(&[Token::Minus, Token::Not]) {
             let op = self.prev_token.clone();
 
             let right = self.unary();
@@ -193,6 +193,16 @@ impl<'a> Parser<'a> {
         if variant_eq(&self.current_token, &token) {
             self.advance();
             return true;
+        }
+
+        return false;
+    }
+
+    fn matches_any(&mut self, tokens: &[Token]) -> bool {
+        for token in tokens {
+            if self.matches(token.clone()) {
+                return true;
+            }
         }
 
         return false;
