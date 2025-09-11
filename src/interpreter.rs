@@ -1,0 +1,146 @@
+use crate::lexer::Token;
+use crate::parser::{Expr, Program};
+use crate::value::Value;
+
+pub struct Interpreter {
+    prg: Box<Expr>,
+}
+
+pub fn interpret_program(prg: &Box<Expr>) {
+    println!("{:?}", interpret_expr(prg));
+}
+
+fn interpret_expr(expr: &Box<Expr>) -> Value {
+    match **expr {
+        Expr::Number(n) => Value::Number(n),
+        Expr::Boolean(b) => Value::Boolean(b),
+
+        Expr::Unary { ref rhs, ref op } => unary_expr(&rhs, op),
+
+        Expr::Binary {
+            ref lhs,
+            ref rhs,
+            ref op,
+        } => binary_expr(&lhs, &rhs, op),
+
+        _ => unreachable!(),
+    }
+}
+
+fn binary_expr(lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Token) -> Value {
+    match op {
+        Token::Plus => add(lhs, rhs),
+        Token::Minus => substract(lhs, rhs),
+        Token::Asterisk => multiply(lhs, rhs),
+        Token::Slash => divide(lhs, rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn add(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs + rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn substract(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs - rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn multiply(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs * rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn divide(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs / rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn unary_expr(right: &Box<Expr>, op: &Token) -> Value {
+    let right_value = interpret_expr(right);
+
+    match op {
+        Token::Minus => {
+            if let Value::Number(v) = right_value {
+                Value::Number(-v)
+            } else {
+                unreachable!()
+            }
+        }
+        Token::Not => {
+            if let Value::Boolean(b) = right_value {
+                Value::Boolean(!b)
+            } else {
+                unreachable!()
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::parse_program;
+
+    use super::*;
+
+    fn test_eval_expression(input: &str, expected: Value) {
+        let prg = parse_program(input);
+
+        // TODO: check that we got an ExprStmt and use it
+
+        let value = interpret_expr(&prg);
+
+        assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn number() {
+        test_eval_expression("2", Value::Number(2.0));
+    }
+
+    #[test]
+    fn boolean() {
+        test_eval_expression("true", Value::Boolean(true));
+        test_eval_expression("false", Value::Boolean(false));
+    }
+
+    #[test]
+    fn unary() {
+        test_eval_expression("-42.0", Value::Number(-42.0));
+        test_eval_expression("--42.0", Value::Number(42.0));
+        test_eval_expression("not true", Value::Boolean(false));
+        test_eval_expression("not not not not false", Value::Boolean(false));
+    }
+
+    #[test]
+    fn binary_arithmetic() {
+        test_eval_expression("3 + 2", Value::Number(5.0));
+        test_eval_expression("4 - 1", Value::Number(3.0));
+        test_eval_expression("10.5 * 4", Value::Number(42.0));
+        test_eval_expression("336 / 8", Value::Number(42.0));
+
+        test_eval_expression("3 + 5 * 4 - 12 / 2", Value::Number(17.0));
+    }
+}
