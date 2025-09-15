@@ -74,7 +74,6 @@ impl Parser {
 
     // NOTE: Will change
     fn parse_program(&mut self) -> Box<Expr> {
-        self.advance();
         return self.expression();
     }
 
@@ -262,11 +261,13 @@ impl Parser {
     }
 
     fn advance(&mut self) -> &Token {
+        let token = &self.tokens[self.current_index];
+
         if self.current_index + 1 < self.tokens.len() {
             self.current_index += 1;
         }
 
-        return &self.tokens[self.current_index - 1];
+        return token;
     }
 }
 
@@ -286,7 +287,6 @@ mod tests {
 
         let mut parser = Parser::new(tokens);
 
-        parser.advance();
         let expr = parser.expression();
 
         assert_eq!(expr, expected);
