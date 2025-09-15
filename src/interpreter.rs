@@ -30,9 +30,15 @@ fn interpret_expr(expr: &Box<Expr>) -> Value {
 fn binary_expr(lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Token) -> Value {
     match op {
         Token::Plus => add(lhs, rhs),
-        Token::Minus => substract(lhs, rhs),
-        Token::Asterisk => multiply(lhs, rhs),
-        Token::Slash => divide(lhs, rhs),
+        Token::Minus => sub(lhs, rhs),
+        Token::Asterisk => mul(lhs, rhs),
+        Token::Slash => div(lhs, rhs),
+        Token::Greater => gt(lhs, rhs),
+        Token::GreaterEqual => ge(lhs, rhs),
+        Token::Less => lt(lhs, rhs),
+        Token::LessEqual => le(lhs, rhs),
+        Token::EqualEqual => eq(lhs, rhs),
+        Token::BangEqual => neq(lhs, rhs),
         Token::Or => or(lhs, rhs),
         Token::And => and(lhs, rhs),
         _ => unreachable!(),
@@ -49,7 +55,7 @@ fn add(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn substract(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn sub(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(lhs);
     let rhs = interpret_expr(rhs);
 
@@ -59,7 +65,7 @@ fn substract(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn multiply(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn mul(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(lhs);
     let rhs = interpret_expr(rhs);
 
@@ -69,7 +75,7 @@ fn multiply(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn divide(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn div(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(lhs);
     let rhs = interpret_expr(rhs);
 
@@ -117,6 +123,60 @@ fn or(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     } else {
         unreachable!();
     }
+}
+
+fn lt(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs < rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn le(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs <= rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn gt(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs > rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn ge(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    match (lhs, rhs) {
+        (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs >= rhs),
+        _ => unreachable!(),
+    }
+}
+
+fn eq(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    return Value::Boolean(lhs == rhs);
+}
+
+fn neq(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(lhs);
+    let rhs = interpret_expr(rhs);
+
+    return Value::Boolean(lhs != rhs);
 }
 
 fn unary_expr(right: &Box<Expr>, op: &Token) -> Value {
@@ -193,5 +253,15 @@ mod tests {
 
         test_eval_expression("true or 1337", Value::Boolean(true));
         test_eval_expression("false or true", Value::Boolean(true));
+    }
+
+    #[test]
+    fn comparisons() {
+        test_eval_expression("1 < 2", Value::Boolean(true));
+        test_eval_expression("2 <= 1", Value::Boolean(false));
+        test_eval_expression("4 > 3.99", Value::Boolean(true));
+        test_eval_expression("3.99 >= 4.01", Value::Boolean(false));
+        test_eval_expression("true == false", Value::Boolean(false));
+        test_eval_expression("true != false", Value::Boolean(true));
     }
 }
