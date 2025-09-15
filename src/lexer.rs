@@ -1,9 +1,8 @@
+use itertools::{Either, Itertools};
 use phf::phf_map;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Invalid(String),
-
     OpenParen,
     CloseParen,
     OpenBrace,
@@ -53,6 +52,13 @@ pub enum Token {
     Return,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LexError {
+    UnexpectedCharacter { char: char, position: usize },
+    UnterminatedString { position: usize },
+    InvalidNumber { text: String, position: usize },
+}
+
 static KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
     "var" => Token::Var,
     "nil" => Token::Nil,
@@ -72,14 +78,21 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
     "return" => Token::Return,
 };
 
-pub struct Lexer<'a> {
+pub fn tokenize(src: &str) -> (Vec<Token>, Vec<LexError>) {
+    return Lexer::new(src).partition_map(|result| match result {
+        Ok(token) => Either::Left(token),
+        Err(e) => Either::Right(e),
+    });
+}
+
+struct Lexer<'a> {
     src: &'a str,
     start_index: usize,
     current_index: usize,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(src: &'a str) -> Lexer<'a> {
+    fn new(src: &'a str) -> Lexer<'a> {
         Lexer {
             src,
             start_index: 0,
@@ -87,21 +100,20 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn invalid(&self) -> Token {
-        Token::Invalid(self.src[self.start_index..self.current_index].to_string())
-    }
-
-    fn char_equal_token(&mut self, one_char: Token, two_char: Token) -> Option<Token> {
+    fn char_equal_token(&mut self, one_char: Token, two_char: Token) -> Result<Token, LexError> {
         if self.matches('=') {
-            Some(two_char)
-        } else {
-            Some(one_char)
+            return Ok(two_char);
         }
+
+        return Ok(one_char);
     }
 
-    fn identifier(&mut self, curr: char) -> Option<Token> {
+    fn identifier(&mut self, curr: char) -> Result<Token, LexError> {
         if !curr.is_alphanumeric() && curr != '_' {
-            return Some(self.invalid());
+            return Err(LexError::UnexpectedCharacter {
+                char: curr,
+                position: self.start_index,
+            });
         }
 
         loop {
@@ -117,15 +129,15 @@ impl<'a> Lexer<'a> {
         }
 
         if let Some(keyword) = KEYWORDS.get(&self.src[self.start_index..self.current_index]) {
-            Some(keyword.clone())
-        } else {
-            Some(Token::Identifier(
-                self.src[self.start_index..self.current_index].to_string(),
-            ))
+            return Ok(keyword.clone());
         }
+
+        return Ok(Token::Identifier(
+            self.src[self.start_index..self.current_index].to_string(),
+        ));
     }
 
-    fn number(&mut self) -> Option<Token> {
+    fn number(&mut self) -> Result<Token, LexError> {
         while self.peek().unwrap_or('\0').is_digit(10) {
             self.advance();
         }
@@ -139,13 +151,17 @@ impl<'a> Lexer<'a> {
         }
 
         let str = &self.src[self.start_index..self.current_index];
-        // TODO: Handle errors
-        let number = str.parse::<f64>().unwrap();
 
-        Some(Token::Number(number))
+        return match str.parse::<f64>() {
+            Ok(number) => Ok(Token::Number(number)),
+            Err(_) => Err(LexError::InvalidNumber {
+                text: str.to_string(),
+                position: self.start_index,
+            }),
+        };
     }
 
-    fn string(&mut self) -> Option<Token> {
+    fn string(&mut self) -> Result<Token, LexError> {
         loop {
             if let Some(c) = self.peek() {
                 match c {
@@ -160,11 +176,13 @@ impl<'a> Lexer<'a> {
                     _ => self.consume(),
                 }
             } else {
-                return Some(self.invalid());
+                return Err(LexError::UnterminatedString {
+                    position: self.start_index,
+                });
             }
         }
 
-        Some(Token::String(
+        Ok(Token::String(
             self.src[self.start_index + 1..self.current_index - 1].to_string(),
         ))
     }
@@ -252,7 +270,7 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Token;
+    type Item = Result<Token, LexError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
@@ -263,26 +281,35 @@ impl<'a> Iterator for Lexer<'a> {
 
         if let Some(char) = char {
             match char {
-                '(' => Some(Token::OpenParen),
-                ')' => Some(Token::CloseParen),
-                '{' => Some(Token::OpenBrace),
-                '}' => Some(Token::CloseBrace),
-                '[' => Some(Token::OpenBracket),
-                ']' => Some(Token::CloseBracket),
-                ';' => Some(Token::Semicolon),
-                ',' => Some(Token::Comma),
-                '.' => Some(Token::Dot),
-                '+' => self.char_equal_token(Token::Plus, Token::PlusEqual),
-                '-' => self.char_equal_token(Token::Minus, Token::MinusEqual),
-                '*' => self.char_equal_token(Token::Asterisk, Token::AsteriskEqual),
-                '/' => self.char_equal_token(Token::Slash, Token::SlashEqual),
-                '=' => self.char_equal_token(Token::Equal, Token::EqualEqual),
-                '!' => self.char_equal_token(self.invalid(), Token::BangEqual),
-                '<' => self.char_equal_token(Token::Less, Token::LessEqual),
-                '>' => self.char_equal_token(Token::Greater, Token::GreaterEqual),
-                '"' => self.string(),
-                '0'..'9' => self.number(),
-                _ => self.identifier(char),
+                '(' => Some(Ok(Token::OpenParen)),
+                ')' => Some(Ok(Token::CloseParen)),
+                '{' => Some(Ok(Token::OpenBrace)),
+                '}' => Some(Ok(Token::CloseBrace)),
+                '[' => Some(Ok(Token::OpenBracket)),
+                ']' => Some(Ok(Token::CloseBracket)),
+                ';' => Some(Ok(Token::Semicolon)),
+                ',' => Some(Ok(Token::Comma)),
+                '.' => Some(Ok(Token::Dot)),
+                '+' => Some(self.char_equal_token(Token::Plus, Token::PlusEqual)),
+                '-' => Some(self.char_equal_token(Token::Minus, Token::MinusEqual)),
+                '*' => Some(self.char_equal_token(Token::Asterisk, Token::AsteriskEqual)),
+                '/' => Some(self.char_equal_token(Token::Slash, Token::SlashEqual)),
+                '=' => Some(self.char_equal_token(Token::Equal, Token::EqualEqual)),
+                '<' => Some(self.char_equal_token(Token::Less, Token::LessEqual)),
+                '>' => Some(self.char_equal_token(Token::Greater, Token::GreaterEqual)),
+                '!' => {
+                    if self.matches('=') {
+                        Some(Ok(Token::BangEqual))
+                    } else {
+                        Some(Err(LexError::UnexpectedCharacter {
+                            char,
+                            position: self.start_index,
+                        }))
+                    }
+                }
+                '"' => Some(self.string()),
+                '0'..'9' => Some(self.number()),
+                _ => Some(self.identifier(char)),
             }
         } else {
             None
@@ -292,16 +319,13 @@ impl<'a> Iterator for Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-
     use super::*;
 
     #[test]
     fn punctuators() {
-        let lexer = Lexer::new("(){}[];,+-*!!====<=>=<>/.+=-=*=/=");
-        let found = lexer.collect_vec();
+        let (tokens, errors) = tokenize("(){}[];,+-*!!====<=>=<>/.+=-=*=/=");
 
-        let expected = vec![
+        let expected_tokens = vec![
             Token::OpenParen,
             Token::CloseParen,
             Token::OpenBrace,
@@ -313,7 +337,6 @@ mod tests {
             Token::Plus,
             Token::Minus,
             Token::Asterisk,
-            Token::Invalid("!".to_string()),
             Token::BangEqual,
             Token::EqualEqual,
             Token::Equal,
@@ -329,7 +352,13 @@ mod tests {
             Token::SlashEqual,
         ];
 
-        assert_eq!(found, expected);
+        let expected_errors = vec![LexError::UnexpectedCharacter {
+            char: '!',
+            position: 11,
+        }];
+
+        assert_eq!(tokens, expected_tokens);
+        assert_eq!(errors, expected_errors);
     }
 
     #[test]
@@ -346,8 +375,7 @@ comments // comments !
 end
         "#;
 
-        let lexer = Lexer::new(str);
-        let found = lexer.collect_vec();
+        let (tokens, errors) = tokenize(str);
 
         let expected = vec![
             Token::Identifier("space".to_string()),
@@ -357,13 +385,13 @@ end
             Token::Identifier("end".to_string()),
         ];
 
-        assert_eq!(found, expected);
+        assert_eq!(tokens, expected);
+        assert_eq!(errors, vec![]);
     }
 
     #[test]
     fn numbers() {
-        let lexer = Lexer::new("123 123.456 .456 123.");
-        let found = lexer.collect_vec();
+        let (tokens, errors) = tokenize("123 123.456 .456 123.");
 
         let expected = vec![
             Token::Number(123.0),
@@ -374,7 +402,8 @@ end
             Token::Dot,
         ];
 
-        assert_eq!(found, expected);
+        assert_eq!(tokens, expected);
+        assert_eq!(errors, vec![]);
     }
 
     #[test]
@@ -383,9 +412,7 @@ end
 andy formless fo _ _123 _abc ab123
 abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_
         "#;
-        let lexer = Lexer::new(str);
-
-        let found = lexer.collect_vec();
+        let (tokens, errors) = tokenize(str);
 
         let expected = vec![
             Token::Identifier("andy".to_string()),
@@ -400,7 +427,8 @@ abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_
             ),
         ];
 
-        assert_eq!(found, expected);
+        assert_eq!(tokens, expected);
+        assert_eq!(errors, vec![]);
     }
 
     #[test]
@@ -409,8 +437,7 @@ abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_
 and struct else false for fun if nil not or return super this true var while 
         "#;
 
-        let lexer = Lexer::new(str);
-        let found = lexer.collect_vec();
+        let (tokens, errors) = tokenize(str);
 
         let expected = vec![
             Token::And,
@@ -431,7 +458,8 @@ and struct else false for fun if nil not or return super this true var while
             Token::While,
         ];
 
-        assert_eq!(found, expected);
+        assert_eq!(tokens, expected);
+        assert_eq!(errors, vec![]);
     }
 
     #[test]
@@ -441,24 +469,25 @@ and struct else false for fun if nil not or return super this true var while
         "string" 
         "string \"with escaped quotes\""
         "unfinished string"#;
-        let lexer = Lexer::new(str);
-        let found = lexer.collect_vec();
 
-        let expected = vec![
+        let (tokens, errors) = tokenize(str);
+
+        let expected_tokens = vec![
             Token::String("".to_string()),
             Token::String("string".to_string()),
             Token::String("string \\\"with escaped quotes\\\"".to_string()),
-            Token::Invalid("\"unfinished string".to_string()),
         ];
 
-        assert_eq!(found, expected);
+        let expected_errors = vec![LexError::UnterminatedString { position: 80 }];
+
+        assert_eq!(tokens, expected_tokens);
+        assert_eq!(errors, expected_errors);
     }
 
     #[test]
     fn misc() {
-        let lexer = Lexer::new("π Hello, World if for While while true false; 1337 42 893.17");
-
-        let found = lexer.collect_vec();
+        let (tokens, errors) =
+            tokenize("π Hello, World if for While while true false; 1337 42 893.17");
 
         let expected = vec![
             Token::Identifier("π".to_string()),
@@ -477,6 +506,7 @@ and struct else false for fun if nil not or return super this true var while
             Token::Number(893.17),
         ];
 
-        assert_eq!(found, expected);
+        assert_eq!(tokens, expected);
+        assert_eq!(errors, vec![]);
     }
 }

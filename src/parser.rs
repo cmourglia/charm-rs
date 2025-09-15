@@ -30,7 +30,7 @@
 // primary      -> NUMBER | STRING | "true" | "false" | "nil"
 //               | "(" expression ")" | IDENTIFIER;
 
-use crate::lexer::{Lexer, Token};
+use crate::lexer::Token;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -53,31 +53,27 @@ pub struct Program {
     exprs: Vec<Expr>,
 }
 
-pub fn parse_program(input: &str) -> Box<Expr> {
-    let lexer = Lexer::new(input);
-    let mut parser = Parser::new(lexer);
-
+// NOTE: Will change
+pub fn parse(tokens: Vec<Token>) -> Box<Expr> {
+    let mut parser = Parser::new(tokens);
     return parser.parse_program();
 }
 
-pub struct Parser<'a> {
-    lexer: Lexer<'a>,
-
-    current_token: Token,
-    prev_token: Token,
+struct Parser {
+    tokens: Vec<Token>,
+    current_index: usize,
 }
 
-impl<'a> Parser<'a> {
-    pub fn new(lexer: Lexer<'a>) -> Self {
+impl Parser {
+    fn new(tokens: Vec<Token>) -> Self {
         Self {
-            lexer,
-            current_token: Token::Invalid(String::from("Not-initialized")),
-            prev_token: Token::Invalid(String::from("Not-initialized")),
+            tokens,
+            current_index: 0,
         }
     }
 
     // NOTE: Will change
-    pub fn parse_program(&mut self) -> Box<Expr> {
+    fn parse_program(&mut self) -> Box<Expr> {
         self.advance();
         return self.expression();
     }
@@ -100,7 +96,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.logic_and();
 
         while self.matches(Token::Or) {
-            let op = self.prev_token.clone();
+            let op = self.tokens[self.current_index - 1].clone();
             let rhs = self.logic_and();
             let lhs = expr;
 
@@ -115,7 +111,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.equality();
 
         while self.matches(Token::And) {
-            let op = self.prev_token.clone();
+            let op = self.tokens[self.current_index - 1].clone();
             let rhs = self.logic_and();
             let lhs = expr;
 
@@ -130,7 +126,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.comparison();
 
         while self.matches_any(&[Token::BangEqual, Token::EqualEqual]) {
-            let op = self.prev_token.clone();
+            let op = self.tokens[self.current_index - 1].clone();
             let rhs = self.factor();
             let lhs = expr;
 
@@ -150,7 +146,7 @@ impl<'a> Parser<'a> {
             Token::Less,
             Token::LessEqual,
         ]) {
-            let op = self.prev_token.clone();
+            let op = self.tokens[self.current_index - 1].clone();
             let rhs = self.factor();
             let lhs = expr;
 
@@ -165,7 +161,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.factor();
 
         while self.matches_any(&[Token::Minus, Token::Plus]) {
-            let op = self.prev_token.clone();
+            let op = self.tokens[self.current_index - 1].clone();
             let rhs = self.factor();
             let lhs = expr;
 
@@ -180,7 +176,7 @@ impl<'a> Parser<'a> {
         let mut expr = self.unary();
 
         while self.matches_any(&[Token::Asterisk, Token::Slash]) {
-            let op = self.prev_token.clone();
+            let op = self.tokens[self.current_index - 1].clone();
             let rhs = self.unary();
             let lhs = expr;
 
@@ -194,7 +190,7 @@ impl<'a> Parser<'a> {
     //               | call ;
     fn unary(&mut self) -> Box<Expr> {
         if self.matches_any(&[Token::Minus, Token::Not]) {
-            let op = self.prev_token.clone();
+            let op = self.tokens[self.current_index - 1].clone();
             let rhs = self.unary();
 
             return Box::new(Expr::Unary { rhs, op });
@@ -216,12 +212,12 @@ impl<'a> Parser<'a> {
     // primary      -> NUMBER | STRING | "true" | "false" | "nil"
     //               | "(" expression ")" | IDENTIFIER;
     fn primary(&mut self) -> Box<Expr> {
-        let expr = match self.current_token {
-            Token::Number(n) => Box::new(Expr::Number(n)),
+        let expr = match &self.tokens[self.current_index] {
+            Token::Number(n) => Box::new(Expr::Number(*n)),
             Token::True => Box::new(Expr::Boolean(true)),
             Token::False => Box::new(Expr::Boolean(false)),
-            Token::String(ref s) => Box::new(Expr::String(s.clone())),
-            _ => unreachable!("Invalid token type: {:?}", &self.current_token),
+            Token::String(s) => Box::new(Expr::String(s.clone())),
+            _ => unreachable!("Invalid token type: {:?}", &self.tokens[self.current_index]),
         };
 
         self.advance();
@@ -230,7 +226,7 @@ impl<'a> Parser<'a> {
     }
 
     fn matches(&mut self, token: Token) -> bool {
-        if variant_eq(&self.current_token, &token) {
+        if variant_eq(&self.tokens[self.current_index], &token) {
             self.advance();
             return true;
         }
@@ -249,33 +245,28 @@ impl<'a> Parser<'a> {
     }
 
     fn check(&self, token: Token) -> bool {
-        return variant_eq(&self.current_token, &token);
+        return variant_eq(&self.tokens[self.current_index], &token);
     }
 
-    fn expect(&mut self, expected: Token) -> Token {
-        if variant_eq(&self.current_token, &expected) {
+    fn expect(&mut self, expected: Token) -> &Token {
+        if variant_eq(&self.tokens[self.current_index], &expected) {
             return self.advance();
         }
 
         println!(
             "Expected token `{:?}`, found `{:?}`",
-            &expected, &self.current_token
+            &expected, &self.tokens[self.current_index]
         );
 
         unreachable!();
     }
 
-    fn advance(&mut self) -> Token {
-        match self.lexer.next() {
-            Some(token) => {
-                self.prev_token = self.current_token.clone();
-                self.current_token = token;
-            }
-
-            None => {}
+    fn advance(&mut self) -> &Token {
+        if self.current_index + 1 < self.tokens.len() {
+            self.current_index += 1;
         }
 
-        return self.prev_token.clone();
+        return &self.tokens[self.current_index - 1];
     }
 }
 
@@ -285,11 +276,15 @@ fn variant_eq<T>(a: &T, b: &T) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::lexer::tokenize;
+
     use super::*;
 
     fn test_expression(input: &str, expected: Box<Expr>) {
-        let lexer = Lexer::new(input);
-        let mut parser = Parser::new(lexer);
+        let (tokens, errors) = tokenize(input);
+        assert_eq!(errors, vec![]);
+
+        let mut parser = Parser::new(tokens);
 
         parser.advance();
         let expr = parser.expression();

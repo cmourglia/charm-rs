@@ -1,12 +1,8 @@
 use crate::lexer::Token;
-use crate::parser::{Expr, Program};
+use crate::parser::Expr;
 use crate::value::Value;
 
-pub struct Interpreter {
-    prg: Box<Expr>,
-}
-
-pub fn interpret_program(prg: &Box<Expr>) {
+pub fn interpret(prg: &Box<Expr>) {
     println!("{:?}", interpret_expr(prg));
 }
 
@@ -203,16 +199,22 @@ fn unary_expr(right: &Box<Expr>, op: &Token) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::parse_program;
+    use crate::{
+        lexer::tokenize,
+        parser::{self, parse},
+    };
 
     use super::*;
 
     fn test_eval_expression(input: &str, expected: Value) {
-        let prg = parse_program(input);
+        let (tokens, errors) = tokenize(input);
+        assert_eq!(errors, vec![]);
+
+        let program = parse(tokens);
 
         // TODO: check that we got an ExprStmt and use it
 
-        let value = interpret_expr(&prg);
+        let value = interpret_expr(&program);
 
         assert_eq!(value, expected);
     }
