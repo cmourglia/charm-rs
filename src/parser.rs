@@ -33,6 +33,11 @@
 use crate::lexer::Token;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Stmt {
+    Expr(Box<Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Binary {
         lhs: Box<Expr>,
@@ -43,10 +48,15 @@ pub enum Expr {
         rhs: Box<Expr>,
         op: Token,
     },
+    Call {
+        callee: Box<Expr>,
+        arguments: Vec<Box<Expr>>,
+    },
     Number(f64),
     Boolean(bool),
     // TODO: Proper string memory management
     String(String),
+    Identifier(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -213,17 +223,48 @@ impl Parser {
             return Ok(Box::new(Expr::Unary { rhs, op }));
         }
 
-        return self.primary();
+        return self.call();
     }
 
     // call         -> primary ( "(" arguments? ")" "* ;
+    // arguments    -> expression ( "," expression )* ","? ;
     fn call(&mut self) -> Result<Box<Expr>, ParseError> {
-        todo!();
+        let start_index = self.current_index;
+        let mut expr = self.primary()?;
+
+        loop {
+            if self.matches(Token::OpenParen) {
+                // FIXME: Should an error be raised if the expr is not an identifier
+                // in that case ?
+
+                let callee = expr;
+                expr = self.finish_call(callee)?;
+            } else {
+                break;
+            }
+        }
+
+        return Ok(expr);
     }
 
-    // arguments    -> expression ( "," expression )* ;
-    fn arguments(&mut self) -> Result<Box<Expr>, ParseError> {
-        todo!();
+    fn finish_call(&mut self, callee: Box<Expr>) -> Result<Box<Expr>, ParseError> {
+        let mut arguments = vec![];
+
+        if !self.check(Token::CloseParen) {
+            loop {
+                arguments.push(self.expression()?);
+
+                if !self.matches(Token::Comma) {
+                    break;
+                }
+            }
+        }
+
+        // TODO: Allow for a leading comma, this is currently not the case
+
+        _ = self.expect(Token::CloseParen)?;
+
+        return Ok(Box::new(Expr::Call { callee, arguments }));
     }
 
     // primary      -> NUMBER | STRING | "true" | "false" | "nil"
@@ -234,8 +275,8 @@ impl Parser {
             Token::True => Box::new(Expr::Boolean(true)),
             Token::False => Box::new(Expr::Boolean(false)),
             Token::String(s) => Box::new(Expr::String(s.clone())),
+            Token::Identifier(s) => Box::new(Expr::Identifier(s.clone())),
             _ => {
-                self.advance();
                 return Err(ParseError::InvalidTokenType {
                     found: self.current_token().clone(),
                     position: self.current_index,
@@ -482,6 +523,50 @@ mod tests {
                 rhs: Box::new(Expr::Number(33.0)),
                 op: Token::LessEqual,
             })),
+        );
+    }
+
+    #[test]
+    fn call_expressions() {
+        test_expression(
+            "foo()",
+            Ok(Box::new(Expr::Call {
+                callee: Box::new(Expr::Identifier("foo".to_string())),
+                arguments: vec![],
+            })),
+        );
+
+        test_expression(
+            "bar(\"test\", 39 + 3)",
+            Ok(Box::new(Expr::Call {
+                callee: Box::new(Expr::Identifier("bar".to_string())),
+                arguments: vec![
+                    Box::new(Expr::String("test".to_string())),
+                    Box::new(Expr::Binary {
+                        lhs: Box::new(Expr::Number(39.0)),
+                        rhs: Box::new(Expr::Number(3.0)),
+                        op: Token::Plus,
+                    }),
+                ],
+            })),
+        );
+
+        // FIXME: Should this be syntaxically valid ?
+        test_expression(
+            "4()",
+            Ok(Box::new(Expr::Call {
+                callee: Box::new(Expr::Number(4.0)),
+                arguments: vec![],
+            })),
+        );
+
+        test_expression(
+            "baz(42",
+            Err(ParseError::UnexpectedToken {
+                expected: Token::CloseParen,
+                found: Token::EOF,
+                position: 3,
+            }),
         );
     }
 }

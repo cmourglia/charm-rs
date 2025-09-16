@@ -3,6 +3,8 @@ use phf::phf_map;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+    EOF,
+
     OpenParen,
     CloseParen,
     OpenBrace,
@@ -79,10 +81,15 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
 };
 
 pub fn tokenize(src: &str) -> (Vec<Token>, Vec<LexError>) {
-    return Lexer::new(src).partition_map(|result| match result {
-        Ok(token) => Either::Left(token),
-        Err(e) => Either::Right(e),
-    });
+    let (mut tokens, errors): (Vec<Token>, Vec<LexError>) =
+        Lexer::new(src).partition_map(|result| match result {
+            Ok(token) => Either::Left(token),
+            Err(e) => Either::Right(e),
+        });
+
+    tokens.push(Token::EOF);
+
+    return (tokens, errors);
 }
 
 struct Lexer<'a> {
@@ -350,6 +357,7 @@ mod tests {
             Token::MinusEqual,
             Token::AsteriskEqual,
             Token::SlashEqual,
+            Token::EOF,
         ];
 
         let expected_errors = vec![LexError::UnexpectedCharacter {
@@ -383,6 +391,7 @@ end
             Token::Identifier("newlines".to_string()),
             Token::Identifier("comments".to_string()),
             Token::Identifier("end".to_string()),
+            Token::EOF,
         ];
 
         assert_eq!(tokens, expected);
@@ -400,6 +409,7 @@ end
             Token::Number(456.0),
             Token::Number(123.0),
             Token::Dot,
+            Token::EOF,
         ];
 
         assert_eq!(tokens, expected);
@@ -425,6 +435,7 @@ abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_
             Token::Identifier(
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_".to_string(),
             ),
+            Token::EOF,
         ];
 
         assert_eq!(tokens, expected);
@@ -456,6 +467,7 @@ and struct else false for fun if nil not or return super this true var while
             Token::True,
             Token::Var,
             Token::While,
+            Token::EOF,
         ];
 
         assert_eq!(tokens, expected);
@@ -476,6 +488,7 @@ and struct else false for fun if nil not or return super this true var while
             Token::String("".to_string()),
             Token::String("string".to_string()),
             Token::String("string \\\"with escaped quotes\\\"".to_string()),
+            Token::EOF,
         ];
 
         let expected_errors = vec![LexError::UnterminatedString { position: 80 }];
@@ -504,6 +517,7 @@ and struct else false for fun if nil not or return super this true var while
             Token::Number(1337.0),
             Token::Number(42.0),
             Token::Number(893.17),
+            Token::EOF,
         ];
 
         assert_eq!(tokens, expected);
