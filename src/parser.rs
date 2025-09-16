@@ -49,12 +49,28 @@ pub enum Expr {
     String(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParseError {
+    UnexpectedToken {
+        expected: Token,
+        found: Token,
+        // TODO: Replace with line info
+        position: usize,
+    },
+    InvalidTokenType {
+        found: Token,
+        // TODO: Replace with line info
+        position: usize,
+    },
+}
+
 pub struct Program {
     exprs: Vec<Expr>,
+    errors: Vec<ParseError>,
 }
 
 // NOTE: Will change
-pub fn parse(tokens: Vec<Token>) -> Box<Expr> {
+pub fn parse(tokens: Vec<Token>) -> Result<Box<Expr>, ParseError> {
     let mut parser = Parser::new(tokens);
     return parser.parse_program();
 }
@@ -73,71 +89,73 @@ impl Parser {
     }
 
     // NOTE: Will change
-    fn parse_program(&mut self) -> Box<Expr> {
+    fn parse_program(&mut self) -> Result<Box<Expr>, ParseError> {
         return self.expression();
     }
 
     // expression   -> assignment ;
-    fn expression(&mut self) -> Box<Expr> {
-        return self.logic_or();
+    fn expression(&mut self) -> Result<Box<Expr>, ParseError> {
+        let expr = self.logic_or()?;
+
+        return Ok(expr);
         // return self.assignement();
     }
 
     // assignment   -> IDENTIFIER "=" assignment | logic_or ;
-    fn assignement(&mut self) -> Box<Expr> {
-        let expr = self.logic_or();
+    fn assignement(&mut self) -> Result<Box<Expr>, ParseError> {
+        let expr = self.logic_or()?;
 
-        return expr;
+        return Ok(expr);
     }
 
     // logic_or     -> logic_and ( "or" logic_and )* ;
-    fn logic_or(&mut self) -> Box<Expr> {
-        let mut expr = self.logic_and();
+    fn logic_or(&mut self) -> Result<Box<Expr>, ParseError> {
+        let mut expr = self.logic_and()?;
 
         while self.matches(Token::Or) {
-            let op = self.tokens[self.current_index - 1].clone();
-            let rhs = self.logic_and();
+            let op = self.previous_token().clone();
+            let rhs = self.logic_and()?;
             let lhs = expr;
 
             expr = Box::new(Expr::Binary { lhs, rhs, op });
         }
 
-        return expr;
+        return Ok(expr);
     }
 
     // logic_and    -> equality ( "and" equality )* ;
-    fn logic_and(&mut self) -> Box<Expr> {
-        let mut expr = self.equality();
+    fn logic_and(&mut self) -> Result<Box<Expr>, ParseError> {
+        let mut expr = self.equality()?;
 
         while self.matches(Token::And) {
-            let op = self.tokens[self.current_index - 1].clone();
-            let rhs = self.logic_and();
+            let op = self.previous_token().clone();
+            let rhs = self.logic_and()?;
             let lhs = expr;
 
             expr = Box::new(Expr::Binary { lhs, rhs, op });
         }
 
-        return expr;
+        return Ok(expr);
     }
 
     // equality     -> comparison ( ( "!=" | "==" ) comparison )* ;
-    fn equality(&mut self) -> Box<Expr> {
-        let mut expr = self.comparison();
+    fn equality(&mut self) -> Result<Box<Expr>, ParseError> {
+        let mut expr = self.comparison()?;
 
         while self.matches_any(&[Token::BangEqual, Token::EqualEqual]) {
-            let op = self.tokens[self.current_index - 1].clone();
-            let rhs = self.factor();
+            let op = self.previous_token().clone();
+            let rhs = self.factor()?;
             let lhs = expr;
 
             expr = Box::new(Expr::Binary { lhs, rhs, op });
         }
 
-        return expr;
+        return Ok(expr);
     }
 
     // comparison   -> term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-    fn comparison(&mut self) -> Box<Expr> {
-        let mut expr = self.term();
+    fn comparison(&mut self) -> Result<Box<Expr>, ParseError> {
+        let mut expr = self.term()?;
 
         while self.matches_any(&[
             Token::Greater,
@@ -145,87 +163,93 @@ impl Parser {
             Token::Less,
             Token::LessEqual,
         ]) {
-            let op = self.tokens[self.current_index - 1].clone();
-            let rhs = self.factor();
+            let op = self.previous_token().clone();
+            let rhs = self.factor()?;
             let lhs = expr;
 
             expr = Box::new(Expr::Binary { lhs, rhs, op });
         }
 
-        return expr;
+        return Ok(expr);
     }
 
     // term         -> factor ( ( "-" | "+" ) factor )* ;
-    fn term(&mut self) -> Box<Expr> {
-        let mut expr = self.factor();
+    fn term(&mut self) -> Result<Box<Expr>, ParseError> {
+        let mut expr = self.factor()?;
 
         while self.matches_any(&[Token::Minus, Token::Plus]) {
-            let op = self.tokens[self.current_index - 1].clone();
-            let rhs = self.factor();
+            let op = self.previous_token().clone();
+            let rhs = self.factor()?;
             let lhs = expr;
 
             expr = Box::new(Expr::Binary { lhs, rhs, op });
         }
 
-        return expr;
+        return Ok(expr);
     }
 
     // factor       -> unary ( ( "/" | "*" ) unary )* ;
-    fn factor(&mut self) -> Box<Expr> {
-        let mut expr = self.unary();
+    fn factor(&mut self) -> Result<Box<Expr>, ParseError> {
+        let mut expr = self.unary()?;
 
         while self.matches_any(&[Token::Asterisk, Token::Slash]) {
-            let op = self.tokens[self.current_index - 1].clone();
-            let rhs = self.unary();
+            let op = self.previous_token().clone();
+            let rhs = self.unary()?;
             let lhs = expr;
 
             expr = Box::new(Expr::Binary { lhs, rhs, op });
         }
 
-        return expr;
+        return Ok(expr);
     }
 
     // unary        -> ("not" | "-") unary
     //               | call ;
-    fn unary(&mut self) -> Box<Expr> {
+    fn unary(&mut self) -> Result<Box<Expr>, ParseError> {
         if self.matches_any(&[Token::Minus, Token::Not]) {
-            let op = self.tokens[self.current_index - 1].clone();
-            let rhs = self.unary();
+            let op = self.previous_token().clone();
+            let rhs = self.unary()?;
 
-            return Box::new(Expr::Unary { rhs, op });
+            return Ok(Box::new(Expr::Unary { rhs, op }));
         }
 
         return self.primary();
     }
 
     // call         -> primary ( "(" arguments? ")" "* ;
-    fn call(&mut self) -> Box<Expr> {
+    fn call(&mut self) -> Result<Box<Expr>, ParseError> {
         todo!();
     }
 
     // arguments    -> expression ( "," expression )* ;
-    fn arguments(&mut self) -> Box<Expr> {
+    fn arguments(&mut self) -> Result<Box<Expr>, ParseError> {
         todo!();
     }
 
     // primary      -> NUMBER | STRING | "true" | "false" | "nil"
     //               | "(" expression ")" | IDENTIFIER;
-    fn primary(&mut self) -> Box<Expr> {
-        let expr = match &self.tokens[self.current_index] {
+    fn primary(&mut self) -> Result<Box<Expr>, ParseError> {
+        let expr = match self.current_token() {
             Token::Number(n) => Box::new(Expr::Number(*n)),
             Token::True => Box::new(Expr::Boolean(true)),
             Token::False => Box::new(Expr::Boolean(false)),
             Token::String(s) => Box::new(Expr::String(s.clone())),
-            _ => unreachable!("Invalid token type: {:?}", &self.tokens[self.current_index]),
+            _ => {
+                self.advance();
+                return Err(ParseError::InvalidTokenType {
+                    found: self.current_token().clone(),
+                    position: self.current_index,
+                });
+            }
         };
 
         self.advance();
 
-        return expr;
+        return Ok(expr);
     }
 
     fn matches(&mut self, token: Token) -> bool {
-        if variant_eq(&self.tokens[self.current_index], &token) {
+        if variant_eq(self.current_token(), &token) {
             self.advance();
             return true;
         }
@@ -244,30 +268,36 @@ impl Parser {
     }
 
     fn check(&self, token: Token) -> bool {
-        return variant_eq(&self.tokens[self.current_index], &token);
+        return variant_eq(self.current_token(), &token);
     }
 
-    fn expect(&mut self, expected: Token) -> &Token {
-        if variant_eq(&self.tokens[self.current_index], &expected) {
-            return self.advance();
+    fn expect(&mut self, expected: Token) -> Result<&Token, ParseError> {
+        if variant_eq(self.current_token(), &expected) {
+            return Ok(self.advance());
         }
 
-        println!(
-            "Expected token `{:?}`, found `{:?}`",
-            &expected, &self.tokens[self.current_index]
-        );
+        return Err(ParseError::UnexpectedToken {
+            expected: expected.clone(),
+            found: self.current_token().clone(),
+            position: self.current_index,
+        });
+    }
 
-        unreachable!();
+    fn current_token(&self) -> &Token {
+        return &self.tokens[self.current_index];
+    }
+
+    fn previous_token(&self) -> &Token {
+        return &self.tokens[self.current_index - 1];
     }
 
     fn advance(&mut self) -> &Token {
-        let token = &self.tokens[self.current_index];
-
         if self.current_index + 1 < self.tokens.len() {
             self.current_index += 1;
+            return self.previous_token();
         }
 
-        return token;
+        return self.current_token();
     }
 }
 
@@ -281,7 +311,7 @@ mod tests {
 
     use super::*;
 
-    fn test_expression(input: &str, expected: Box<Expr>) {
+    fn test_expression(input: &str, expected: Result<Box<Expr>, ParseError>) {
         let (tokens, errors) = tokenize(input);
         assert_eq!(errors, vec![]);
 
@@ -294,11 +324,19 @@ mod tests {
 
     #[test]
     fn primary_expressions() {
-        test_expression("42", Box::new(Expr::Number(42.0)));
-        test_expression("true", Box::new(Expr::Boolean(true)));
+        test_expression("42", Ok(Box::new(Expr::Number(42.0))));
+        test_expression("true", Ok(Box::new(Expr::Boolean(true))));
         test_expression(
             "\"hello, world\"",
-            Box::new(Expr::String("hello, world".into())),
+            Ok(Box::new(Expr::String("hello, world".into()))),
+        );
+
+        test_expression(
+            "if",
+            Err(ParseError::InvalidTokenType {
+                found: Token::If,
+                position: 0,
+            }),
         );
     }
 
@@ -306,18 +344,18 @@ mod tests {
     fn unary_expressions() {
         test_expression(
             "-42",
-            Box::new(Expr::Unary {
+            Ok(Box::new(Expr::Unary {
                 rhs: Box::new(Expr::Number(42.0)),
                 op: Token::Minus,
-            }),
+            })),
         );
 
         test_expression(
             "not false",
-            Box::new(Expr::Unary {
+            Ok(Box::new(Expr::Unary {
                 rhs: Box::new(Expr::Boolean(false)),
                 op: Token::Not,
-            }),
+            })),
         );
     }
 
@@ -325,20 +363,20 @@ mod tests {
     fn term_expressions() {
         test_expression(
             "1 + 2",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(1.0)),
                 rhs: Box::new(Expr::Number(2.0)),
                 op: Token::Plus,
-            }),
+            })),
         );
 
         test_expression(
             "4.2 - 13.37",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(4.2)),
                 rhs: Box::new(Expr::Number(13.37)),
                 op: Token::Minus,
-            }),
+            })),
         );
     }
 
@@ -346,20 +384,20 @@ mod tests {
     fn factor_expressions() {
         test_expression(
             "2 * 3",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(2.0)),
                 rhs: Box::new(Expr::Number(3.0)),
                 op: Token::Asterisk,
-            }),
+            })),
         );
 
         test_expression(
             "7 / 4",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(7.0)),
                 rhs: Box::new(Expr::Number(4.0)),
                 op: Token::Slash,
-            }),
+            })),
         );
     }
 
@@ -367,11 +405,11 @@ mod tests {
     fn logic_or_expressions() {
         test_expression(
             "true or false",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Boolean(true)),
                 rhs: Box::new(Expr::Boolean(false)),
                 op: Token::Or,
-            }),
+            })),
         );
     }
 
@@ -379,11 +417,11 @@ mod tests {
     fn logic_and_expressions() {
         test_expression(
             "false and true",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Boolean(false)),
                 rhs: Box::new(Expr::Boolean(true)),
                 op: Token::And,
-            }),
+            })),
         );
     }
 
@@ -391,20 +429,20 @@ mod tests {
     fn equality_expressions() {
         test_expression(
             "33.0 == false",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(33.0)),
                 rhs: Box::new(Expr::Boolean(false)),
                 op: Token::EqualEqual,
-            }),
+            })),
         );
 
         test_expression(
             "\"hello\" != \"test\"",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::String("hello".into())),
                 rhs: Box::new(Expr::String("test".into())),
                 op: Token::BangEqual,
-            }),
+            })),
         );
     }
 
@@ -412,38 +450,38 @@ mod tests {
     fn comparison_expressions() {
         test_expression(
             "42 > 33",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(42.0)),
                 rhs: Box::new(Expr::Number(33.0)),
                 op: Token::Greater,
-            }),
+            })),
         );
 
         test_expression(
             "42 >= 33",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(42.0)),
                 rhs: Box::new(Expr::Number(33.0)),
                 op: Token::GreaterEqual,
-            }),
+            })),
         );
 
         test_expression(
             "42 < 33",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(42.0)),
                 rhs: Box::new(Expr::Number(33.0)),
                 op: Token::Less,
-            }),
+            })),
         );
 
         test_expression(
             "42 <= 33",
-            Box::new(Expr::Binary {
+            Ok(Box::new(Expr::Binary {
                 lhs: Box::new(Expr::Number(42.0)),
                 rhs: Box::new(Expr::Number(33.0)),
                 op: Token::LessEqual,
-            }),
+            })),
         );
     }
 }

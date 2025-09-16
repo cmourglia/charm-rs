@@ -211,6 +211,9 @@ mod tests {
         assert_eq!(errors, vec![]);
 
         let program = parse(tokens);
+        assert!(!program.is_err());
+
+        let program = program.unwrap();
 
         // TODO: check that we got an ExprStmt and use it
 
