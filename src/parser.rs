@@ -39,6 +39,7 @@ pub enum Stmt {
         identifier: String,
         expr: Option<Box<Expr>>,
     },
+    Block(Vec<Box<Stmt>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,16 +69,19 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+// TODO: Replace position with line info
 pub enum ParseError {
     UnexpectedToken {
         expected: Token,
         found: Token,
-        // TODO: Replace with line info
         position: usize,
     },
     InvalidTokenType {
         found: Token,
-        // TODO: Replace with line info
+        position: usize,
+    },
+    UnexpectedEndOfFile {
+        expected: Token,
         position: usize,
     },
 }
@@ -195,6 +199,28 @@ impl Parser {
 
     // block_stmt       -> "{" ( statement )* "}" ;
     fn block_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+        let start_index = self.current_index;
+        self.consume(Token::OpenBrace)?;
+
+        let mut statements = vec![];
+
+        loop {
+            if self.matches(Token::CloseBrace) {
+                break;
+            }
+
+            if let Some(stmt) = self.declaration()? {
+                statements.push(stmt);
+            } else {
+                return Err(ParseError::UnexpectedEndOfFile {
+                    expected: Token::CloseBrace,
+                    position: start_index,
+                });
+            }
+        }
+
+        return Ok(Box::new(Stmt::Block(statements)));
+    }
         todo!()
     }
 
@@ -572,6 +598,58 @@ mod stmt_tests {
                 expected: Token::Semicolon,
                 found: Token::EOF,
                 position: 4,
+            }),
+        );
+    }
+
+    #[test]
+    fn block_statement() {
+        test_statement(
+            r#"{
+            }"#,
+            Ok(Some(Box::new(Stmt::Block(vec![])))),
+        );
+
+        test_statement(
+            r#"{
+                42;
+            }"#,
+            Ok(Some(Box::new(Stmt::Block(vec![Box::new(Stmt::Expr(
+                Box::new(Expr::Number(42.0)),
+            ))])))),
+        );
+
+        test_statement(
+            r#"{
+                var foo = 42;
+                var bar = 1337;
+                var baz = foo + bar;
+            }"#,
+            Ok(Some(Box::new(Stmt::Block(vec![
+                Box::new(Stmt::VarDecl {
+                    identifier: "foo".to_string(),
+                    expr: Some(Box::new(Expr::Number(42.0))),
+                }),
+                Box::new(Stmt::VarDecl {
+                    identifier: "bar".to_string(),
+                    expr: Some(Box::new(Expr::Number(1337.0))),
+                }),
+                Box::new(Stmt::VarDecl {
+                    identifier: "baz".to_string(),
+                    expr: Some(Box::new(Expr::Binary {
+                        lhs: Box::new(Expr::Identifier("foo".to_string())),
+                        rhs: Box::new(Expr::Identifier("bar".to_string())),
+                        op: Token::Plus,
+                    })),
+                }),
+            ])))),
+        );
+
+        test_statement(
+            "{ 42; ",
+            Err(ParseError::UnexpectedEndOfFile {
+                expected: Token::CloseBrace,
+                position: 0,
             }),
         );
     }
