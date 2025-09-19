@@ -39,6 +39,12 @@ pub enum Stmt {
         identifier: String,
         expr: Option<Box<Expr>>,
     },
+    FunctionDecl {
+        identifier: String,
+        // FIXME: This will need to be type declarations at some point instead
+        args: Vec<String>,
+        body: Box<Stmt>,
+    },
     Block(Vec<Box<Stmt>>),
 }
 
@@ -188,13 +194,33 @@ impl Parser {
 
     // function_decl    -> "function" IDENTIFIER "(" parameters? ")" block_stmt ;
     fn function_decl(&mut self) -> Result<Box<Stmt>, ParseError> {
-        todo!()
-    }
+        self.consume(Token::Function)?;
 
-    // if_stmt          -> "if" expression block_stmt
-    //                     ( "else" if_stmt | block_stmt ) ? ;
-    fn if_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
-        todo!()
+        let identifier = self.identifier()?;
+
+        let mut args = vec![];
+
+        self.consume(Token::OpenParen)?;
+        if !self.check(Token::CloseParen) {
+            // TODO: Allow for trailing comma at some point
+            loop {
+                let arg = self.identifier()?;
+                args.push(arg);
+
+                if !self.matches(Token::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(Token::CloseParen)?;
+
+        let body = self.block_stmt()?;
+
+        return Ok(Box::new(Stmt::FunctionDecl {
+            identifier,
+            args,
+            body,
+        }));
     }
 
     // block_stmt       -> "{" ( statement )* "}" ;
@@ -221,6 +247,10 @@ impl Parser {
 
         return Ok(Box::new(Stmt::Block(statements)));
     }
+
+    // if_stmt          -> "if" expression block_stmt
+    //                     ( "else" if_stmt | block_stmt ) ? ;
+    fn if_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
         todo!()
     }
 
@@ -650,6 +680,45 @@ mod stmt_tests {
             Err(ParseError::UnexpectedEndOfFile {
                 expected: Token::CloseBrace,
                 position: 0,
+            }),
+        );
+    }
+
+    #[test]
+    fn function_decl() {
+        test_statement(
+            "function foo() {}",
+            Ok(Some(Box::new(Stmt::FunctionDecl {
+                identifier: "foo".to_string(),
+                args: vec![],
+                body: Box::new(Stmt::Block(vec![])),
+            }))),
+        );
+
+        test_statement(
+            "function foo(a) {}",
+            Ok(Some(Box::new(Stmt::FunctionDecl {
+                identifier: "foo".to_string(),
+                args: vec!["a".to_string()],
+                body: Box::new(Stmt::Block(vec![])),
+            }))),
+        );
+
+        test_statement(
+            "function foo(bar, baz) {}",
+            Ok(Some(Box::new(Stmt::FunctionDecl {
+                identifier: "foo".to_string(),
+                args: vec!["bar".to_string(), "baz".to_string()],
+                body: Box::new(Stmt::Block(vec![])),
+            }))),
+        );
+
+        test_statement(
+            "function foo(bar, baz {}",
+            Err(ParseError::UnexpectedToken {
+                expected: Token::CloseParen,
+                found: Token::OpenBrace,
+                position: 6,
             }),
         );
     }
