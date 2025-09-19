@@ -35,6 +35,10 @@ use crate::lexer::Token;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Expr(Box<Expr>),
+    VarDecl {
+        identifier: String,
+        expr: Option<Box<Expr>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,7 +167,19 @@ impl Parser {
 
     // var_decl         -> "var" IDENTIFIER ( "=" expression )? ";" ;
     fn var_decl(&mut self) -> Result<Box<Stmt>, ParseError> {
-        todo!()
+        self.consume(Token::Var)?;
+
+        let identifier = self.identifier()?;
+
+        let mut expr = None;
+
+        if self.matches(Token::Equal) {
+            expr = Some(self.expression()?);
+        }
+
+        self.consume(Token::Semicolon)?;
+
+        return Ok(Box::new(Stmt::VarDecl { identifier, expr }));
     }
 
     // function_decl    -> "function" IDENTIFIER "(" parameters? ")" block_stmt ;
@@ -411,6 +427,15 @@ impl Parser {
         return Ok(expr);
     }
 
+    fn identifier(&mut self) -> Result<String, ParseError> {
+        let token = self.consume(Token::Identifier(String::new()))?;
+
+        match token {
+            Token::Identifier(identifier) => Ok(identifier.clone()),
+            _ => unreachable!("Already checked, should never ever get there"),
+        }
+    }
+
     fn matches(&mut self, token: Token) -> bool {
         if variant_eq(self.current_token(), &token) {
             self.advance();
@@ -511,6 +536,43 @@ mod stmt_tests {
                 }),
                 op: Token::Or,
             }))))),
+        );
+    }
+
+    #[test]
+    fn var_decl() {
+        test_statement(
+            "var foo;",
+            Ok(Some(Box::new(Stmt::VarDecl {
+                identifier: "foo".to_string(),
+                expr: None,
+            }))),
+        );
+
+        test_statement(
+            "var toto = \"tata\";",
+            Ok(Some(Box::new(Stmt::VarDecl {
+                identifier: "toto".to_string(),
+                expr: Some(Box::new(Expr::String("tata".to_string()))),
+            }))),
+        );
+
+        test_statement(
+            "var bar",
+            Err(ParseError::UnexpectedToken {
+                expected: Token::Semicolon,
+                found: Token::EOF,
+                position: 2,
+            }),
+        );
+
+        test_statement(
+            "var baz = 42",
+            Err(ParseError::UnexpectedToken {
+                expected: Token::Semicolon,
+                found: Token::EOF,
+                position: 4,
+            }),
         );
     }
 
