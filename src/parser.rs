@@ -134,7 +134,7 @@ impl Parser {
 
         match self.current_token() {
             Token::Var => Ok(Some(self.var_decl()?)),
-            Token::Fun => Ok(Some(self.function_decl()?)),
+            Token::Function => Ok(Some(self.function_decl()?)),
             Token::EOF => Ok(None),
             _ => Ok(Some(self.statement()?)),
         }

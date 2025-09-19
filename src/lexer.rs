@@ -50,7 +50,7 @@ pub enum Token {
     Struct,
     Super,
     This,
-    Fun,
+    Function,
     Return,
 }
 
@@ -76,7 +76,7 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
     "struct" => Token::Struct,
     "super" => Token::Super,
     "this" => Token::This,
-    "fun" => Token::Fun,
+    "function" => Token::Function,
     "return" => Token::Return,
 };
 
@@ -445,7 +445,7 @@ abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_
     #[test]
     fn keywords() {
         let str = r#"
-and struct else false for fun if nil not or return super this true var while 
+and struct else false for function if nil not or return super this true var while 
         "#;
 
         let (tokens, errors) = tokenize(str);
@@ -456,7 +456,7 @@ and struct else false for fun if nil not or return super this true var while
             Token::Else,
             Token::False,
             Token::For,
-            Token::Fun,
+            Token::Function,
             Token::If,
             Token::Nil,
             Token::Not,
