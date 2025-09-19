@@ -1,9 +1,15 @@
 use crate::lexer::Token;
-use crate::parser::Expr;
+use crate::parser::{Expr, Program, Stmt};
 use crate::value::Value;
 
-pub fn interpret(prg: &Box<Expr>) {
-    println!("{:?}", interpret_expr(prg));
+pub fn interpret(prg: &Program) {
+    for stmt in &prg.statements {
+        interpret_stmt(stmt);
+    }
+}
+
+fn interpret_stmt(stmt: &Box<Stmt>) {
+    todo!();
 }
 
 fn interpret_expr(expr: &Box<Expr>) -> Value {
@@ -211,62 +217,63 @@ mod tests {
         assert_eq!(errors, vec![]);
 
         let program = parse(tokens);
-        assert!(!program.is_err());
+        assert_eq!(program.errors.len(), 0);
+        assert_eq!(program.statements.len(), 1);
 
-        let program = program.unwrap();
-
-        // TODO: check that we got an ExprStmt and use it
-
-        let value = interpret_expr(&program);
-
-        assert_eq!(value, expected);
+        match *program.statements[0] {
+            Stmt::Expr(ref expr) => {
+                let value = interpret_expr(expr);
+                assert_eq!(value, expected);
+            }
+            _ => assert!(false),
+        }
     }
 
     #[test]
     fn number() {
-        test_eval_expression("2", Value::Number(2.0));
+        test_eval_expression("2;", Value::Number(2.0));
     }
 
     #[test]
     fn boolean() {
-        test_eval_expression("true", Value::Boolean(true));
-        test_eval_expression("false", Value::Boolean(false));
+        test_eval_expression("true;", Value::Boolean(true));
+        test_eval_expression("false;", Value::Boolean(false));
     }
 
     #[test]
     fn unary() {
-        test_eval_expression("-42.0", Value::Number(-42.0));
-        test_eval_expression("--42.0", Value::Number(42.0));
-        test_eval_expression("not true", Value::Boolean(false));
-        test_eval_expression("not not not not false", Value::Boolean(false));
+        test_eval_expression("-42.0;", Value::Number(-42.0));
+        test_eval_expression("--42.0;", Value::Number(42.0));
+        test_eval_expression("not true;", Value::Boolean(false));
+        test_eval_expression("not not not not false;", Value::Boolean(false));
     }
 
     #[test]
     fn binary_arithmetic() {
-        test_eval_expression("3 + 2", Value::Number(5.0));
-        test_eval_expression("4 - 1", Value::Number(3.0));
-        test_eval_expression("10.5 * 4", Value::Number(42.0));
-        test_eval_expression("336 / 8", Value::Number(42.0));
+        test_eval_expression("3 + 2;", Value::Number(5.0));
+        test_eval_expression("4 - 1;", Value::Number(3.0));
+        test_eval_expression("10.5 * 4;", Value::Number(42.0));
+        test_eval_expression("336 / 8;", Value::Number(42.0));
 
-        test_eval_expression("3 + 5 * 4 - 12 / 2", Value::Number(17.0));
+        test_eval_expression("3 + 5 * 4 - 12 / 2;", Value::Number(17.0));
     }
 
     #[test]
     fn binary_logic() {
-        test_eval_expression("true and false", Value::Boolean(false));
-        test_eval_expression("false and 42.0", Value::Boolean(false));
+        test_eval_expression("true and false;", Value::Boolean(false));
+        test_eval_expression("false and 42.0;", Value::Boolean(false));
 
-        test_eval_expression("true or 1337", Value::Boolean(true));
-        test_eval_expression("false or true", Value::Boolean(true));
+        test_eval_expression("true or 1337;", Value::Boolean(true));
+        test_eval_expression("false or true;", Value::Boolean(true));
     }
 
     #[test]
     fn comparisons() {
-        test_eval_expression("1 < 2", Value::Boolean(true));
-        test_eval_expression("2 <= 1", Value::Boolean(false));
-        test_eval_expression("4 > 3.99", Value::Boolean(true));
-        test_eval_expression("3.99 >= 4.01", Value::Boolean(false));
-        test_eval_expression("true == false", Value::Boolean(false));
-        test_eval_expression("true != false", Value::Boolean(true));
+        test_eval_expression("1 < 2;", Value::Boolean(true));
+        test_eval_expression("2 <= 1;", Value::Boolean(false));
+        test_eval_expression("4 > 3.99;", Value::Boolean(true));
+        test_eval_expression("3.99 >= 4.01;", Value::Boolean(false));
+        test_eval_expression("true == false;", Value::Boolean(false));
+        test_eval_expression("true != false;", Value::Boolean(true));
     }
 }

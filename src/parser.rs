@@ -79,12 +79,12 @@ pub enum ParseError {
 }
 
 pub struct Program {
-    exprs: Vec<Expr>,
-    errors: Vec<ParseError>,
+    pub statements: Vec<Box<Stmt>>,
+    pub errors: Vec<ParseError>,
 }
 
 // NOTE: Will change
-pub fn parse(tokens: Vec<Token>) -> Result<Box<Expr>, ParseError> {
+pub fn parse(tokens: Vec<Token>) -> Program {
     let mut parser = Parser::new(tokens);
     return parser.parse_program();
 }
@@ -103,8 +103,100 @@ impl Parser {
     }
 
     // NOTE: Will change
-    fn parse_program(&mut self) -> Result<Box<Expr>, ParseError> {
-        return self.expression();
+    // program          -> declaration* EOF ;
+    fn parse_program(&mut self) -> Program {
+        let mut program = Program {
+            statements: vec![],
+            errors: vec![],
+        };
+
+        loop {
+            let decl = self.declaration();
+
+            match decl {
+                Ok(stmt) => {
+                    if let Some(stmt) = stmt {
+                        program.statements.push(stmt);
+                    } else {
+                        break;
+                    }
+                }
+                Err(err) => program.errors.push(err),
+            };
+        }
+
+        return program;
+    }
+
+    // declaration      -> var_decl | fun_decl | statement
+    fn declaration(&mut self) -> Result<Option<Box<Stmt>>, ParseError> {
+        // TODO: Handle EOF ? Need to return an option ?
+
+        match self.current_token() {
+            Token::Var => Ok(Some(self.var_decl()?)),
+            Token::Fun => Ok(Some(self.function_decl()?)),
+            Token::EOF => Ok(None),
+            _ => Ok(Some(self.statement()?)),
+        }
+    }
+
+    // statement        -> expr_stmt | if_stmt | block_stmt
+    //                   | while_stmt | for_stmt | return_stmt ;
+    fn statement(&mut self) -> Result<Box<Stmt>, ParseError> {
+        match self.current_token() {
+            Token::If => self.if_stmt(),
+            Token::For => self.for_stmt(),
+            Token::While => self.while_stmt(),
+            Token::OpenBrace => self.block_stmt(),
+            Token::Return => self.return_stmt(),
+            _ => self.expr_stmt(),
+        }
+    }
+
+    // expr_stmt        -> expression ";" ;
+    fn expr_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+        let expr = self.expression()?;
+        self.expect(Token::Semicolon)?;
+
+        return Ok(Box::new(Stmt::Expr(expr)));
+    }
+
+    // var_decl         -> "var" IDENTIFIER ( "=" expression )? ";" ;
+    fn var_decl(&mut self) -> Result<Box<Stmt>, ParseError> {
+        todo!()
+    }
+
+    // function_decl    -> "function" IDENTIFIER "(" parameters? ")" block_stmt ;
+    fn function_decl(&mut self) -> Result<Box<Stmt>, ParseError> {
+        todo!()
+    }
+
+    // if_stmt          -> "if" expression block_stmt
+    //                     ( "else" if_stmt | block_stmt ) ? ;
+    fn if_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+        todo!()
+    }
+
+    // block_stmt       -> "{" ( statement )* "}" ;
+    fn block_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+        todo!()
+    }
+
+    // while_stmt       -> "while" expression block_stmt ;
+    fn while_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+        todo!()
+    }
+
+    // for_stmt         -> "for" ( var_decl | expr_stmt | ";" )
+    //                     expression? ";"
+    //                     expression? block_stmt ;
+    fn for_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+        todo!()
+    }
+
+    // return_stmt      -> "return" expression? ";" ;
+    fn return_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+        todo!()
     }
 
     // expression   -> assignment ;
@@ -377,7 +469,56 @@ fn variant_eq<T>(a: &T, b: &T) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod stmt_tests {
+    use crate::lexer::tokenize;
+
+    use super::*;
+
+    fn test_statement(input: &str, expected: Result<Option<Box<Stmt>>, ParseError>) {
+        let (tokens, errors) = tokenize(input);
+        assert_eq!(errors, vec![]);
+
+        let mut parser = Parser::new(tokens);
+        let stmt = parser.declaration();
+
+        assert_eq!(stmt, expected);
+    }
+
+    #[test]
+    fn empty_declaration() {
+        test_statement("", Ok(None));
+    }
+
+    #[test]
+    fn expr_stmt() {
+        test_statement(
+            "42;",
+            Ok(Some(Box::new(Stmt::Expr(Box::new(Expr::Number(42.0)))))),
+        );
+
+        test_statement(
+            "true or false and 42 < 43;",
+            Ok(Some(Box::new(Stmt::Expr(Box::new(Expr::Binary {
+                lhs: Box::new(Expr::Boolean(true)),
+                rhs: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Boolean(false)),
+                    rhs: Box::new(Expr::Binary {
+                        lhs: Box::new(Expr::Number(42.0)),
+                        rhs: Box::new(Expr::Number(43.0)),
+                        op: Token::Less,
+                    }),
+                    op: Token::And,
+                }),
+                op: Token::Or,
+            }))))),
+        );
+    }
+
+    // TODO: Test program
+}
+
+#[cfg(test)]
+mod expr_tests {
     use crate::lexer::tokenize;
 
     use super::*;
@@ -387,7 +528,6 @@ mod tests {
         assert_eq!(errors, vec![]);
 
         let mut parser = Parser::new(tokens);
-
         let expr = parser.expression();
 
         assert_eq!(expr, expected);

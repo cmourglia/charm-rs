@@ -15,7 +15,7 @@ pub fn interpret_program(input: &str) {
         return;
     }
 
-    let program = parse(tokens).unwrap();
+    let program = parse(tokens);
 
     interpret(&program);
 }
