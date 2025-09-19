@@ -156,7 +156,7 @@ impl Parser {
     // expr_stmt        -> expression ";" ;
     fn expr_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
         let expr = self.expression()?;
-        self.expect(Token::Semicolon)?;
+        self.consume(Token::Semicolon)?;
 
         return Ok(Box::new(Stmt::Expr(expr)));
     }
@@ -384,7 +384,7 @@ impl Parser {
 
         // TODO: Allow for a leading comma, this is currently not the case
 
-        _ = self.expect(Token::CloseParen)?;
+        _ = self.consume(Token::CloseParen)?;
 
         return Ok(Box::new(Expr::Call { callee, arguments }));
     }
@@ -434,7 +434,7 @@ impl Parser {
         return variant_eq(self.current_token(), &token);
     }
 
-    fn expect(&mut self, expected: Token) -> Result<&Token, ParseError> {
+    fn consume(&mut self, expected: Token) -> Result<&Token, ParseError> {
         if variant_eq(self.current_token(), &expected) {
             return Ok(self.advance());
         }
