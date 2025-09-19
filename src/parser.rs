@@ -49,7 +49,7 @@ pub enum Expr {
         op: Token,
     },
     Call {
-        callee: Box<Expr>,
+        callee: String,
         arguments: Vec<Box<Expr>>,
     },
     Assignment {
@@ -251,15 +251,24 @@ impl Parser {
     // arguments    -> expression ( "," expression )* ","? ;
     fn call(&mut self) -> Result<Box<Expr>, ParseError> {
         let start_index = self.current_index;
-        let mut expr = self.primary()?;
+        let expr = self.primary()?;
 
         loop {
             if self.matches(Token::OpenParen) {
-                // FIXME: Should an error be raised if the expr is not an identifier
-                // in that case ?
-
                 let callee = expr;
-                expr = self.finish_call(callee)?;
+
+                match *callee {
+                    Expr::Identifier(identifier) => {
+                        return Ok(self.finish_call(identifier)?);
+                    }
+                    _ => {
+                        return Err(ParseError::UnexpectedToken {
+                            expected: Token::Identifier("".to_string()),
+                            found: self.tokens[start_index].clone(),
+                            position: start_index,
+                        });
+                    }
+                };
             } else {
                 break;
             }
@@ -268,7 +277,7 @@ impl Parser {
         return Ok(expr);
     }
 
-    fn finish_call(&mut self, callee: Box<Expr>) -> Result<Box<Expr>, ParseError> {
+    fn finish_call(&mut self, callee: String) -> Result<Box<Expr>, ParseError> {
         let mut arguments = vec![];
 
         if !self.check(Token::CloseParen) {
@@ -552,7 +561,7 @@ mod tests {
         test_expression(
             "foo()",
             Ok(Box::new(Expr::Call {
-                callee: Box::new(Expr::Identifier("foo".to_string())),
+                callee: "foo".to_string(),
                 arguments: vec![],
             })),
         );
@@ -560,7 +569,7 @@ mod tests {
         test_expression(
             "bar(\"test\", 39 + 3)",
             Ok(Box::new(Expr::Call {
-                callee: Box::new(Expr::Identifier("bar".to_string())),
+                callee: "bar".to_string(),
                 arguments: vec![
                     Box::new(Expr::String("test".to_string())),
                     Box::new(Expr::Binary {
@@ -572,13 +581,13 @@ mod tests {
             })),
         );
 
-        // FIXME: Should this be syntaxically valid ?
         test_expression(
             "4()",
-            Ok(Box::new(Expr::Call {
-                callee: Box::new(Expr::Number(4.0)),
-                arguments: vec![],
-            })),
+            Err(ParseError::UnexpectedToken {
+                expected: Token::Identifier("".to_string()),
+                found: Token::Number(4.0),
+                position: 0,
+            }),
         );
 
         test_expression(
