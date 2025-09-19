@@ -52,6 +52,10 @@ pub enum Expr {
         callee: Box<Expr>,
         arguments: Vec<Box<Expr>>,
     },
+    Assignment {
+        identifier: String,
+        value: Box<Expr>,
+    },
     Number(f64),
     Boolean(bool),
     // TODO: Proper string memory management
@@ -105,15 +109,32 @@ impl Parser {
 
     // expression   -> assignment ;
     fn expression(&mut self) -> Result<Box<Expr>, ParseError> {
-        let expr = self.logic_or()?;
+        let expr = self.assignement()?;
 
         return Ok(expr);
-        // return self.assignement();
     }
 
     // assignment   -> IDENTIFIER "=" assignment | logic_or ;
     fn assignement(&mut self) -> Result<Box<Expr>, ParseError> {
+        let current_index = self.current_index;
         let expr = self.logic_or()?;
+
+        if self.matches(Token::Equal) {
+            let value = self.logic_or()?;
+
+            match *expr {
+                Expr::Identifier(identifier) => {
+                    return Ok(Box::new(Expr::Assignment { identifier, value }));
+                }
+                _ => {
+                    return Err(ParseError::UnexpectedToken {
+                        expected: Token::Identifier("".to_string()),
+                        found: self.tokens[current_index].clone(),
+                        position: current_index,
+                    });
+                }
+            }
+        }
 
         return Ok(expr);
     }
@@ -566,6 +587,38 @@ mod tests {
                 expected: Token::CloseParen,
                 found: Token::EOF,
                 position: 3,
+            }),
+        );
+    }
+
+    #[test]
+    fn assignment_expressions() {
+        test_expression(
+            "a = 42",
+            Ok(Box::new(Expr::Assignment {
+                identifier: "a".to_string(),
+                value: Box::new(Expr::Number(42.0)),
+            })),
+        );
+
+        test_expression(
+            "foo=15+27",
+            Ok(Box::new(Expr::Assignment {
+                identifier: "foo".to_string(),
+                value: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Number(15.0)),
+                    rhs: Box::new(Expr::Number(27.0)),
+                    op: Token::Plus,
+                }),
+            })),
+        );
+
+        test_expression(
+            "27 = 42",
+            Err(ParseError::UnexpectedToken {
+                expected: Token::Identifier("".to_string()),
+                found: Token::Number(27.0),
+                position: 0,
             }),
         );
     }
