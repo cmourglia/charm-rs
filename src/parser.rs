@@ -496,6 +496,7 @@ impl Parser {
             Token::False => Box::new(Expr::Boolean(false)),
             Token::String(s) => Box::new(Expr::String(s.clone())),
             Token::Identifier(s) => Box::new(Expr::Identifier(s.clone())),
+            Token::OpenParen => self.grouping()?,
             _ => {
                 return Err(ParseError::InvalidTokenType {
                     found: self.current_token().clone(),
@@ -506,6 +507,13 @@ impl Parser {
 
         self.advance();
 
+        return Ok(expr);
+    }
+
+    fn grouping(&mut self) -> Result<Box<Expr>, ParseError> {
+        self.consume(Token::OpenParen)?;
+        let expr = self.expression()?;
+        self.expect(Token::CloseParen)?;
         return Ok(expr);
     }
 
@@ -551,6 +559,18 @@ impl Parser {
             found: self.current_token().clone(),
             position: self.current_index,
         });
+    }
+
+    fn expect(&mut self, expected: Token) -> Result<(), ParseError> {
+        if !self.check(expected.clone()) {
+            return Err(ParseError::UnexpectedToken {
+                expected: expected.clone(),
+                found: self.current_token().clone(),
+                position: self.current_index,
+            });
+        }
+
+        return Ok(());
     }
 
     fn current_token(&self) -> &Token {
@@ -845,6 +865,23 @@ mod expr_tests {
                 found: Token::If,
                 position: 0,
             }),
+        );
+    }
+
+    #[test]
+    fn grouped_expressions() {
+        test_expression("(42)", Ok(Box::new(Expr::Number(42.0))));
+        test_expression(
+            "1 * (2 + 3)",
+            Ok(Box::new(Expr::Binary {
+                lhs: Box::new(Expr::Number(1.0)),
+                rhs: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Number(2.0)),
+                    rhs: Box::new(Expr::Number(3.0)),
+                    op: Token::Plus,
+                }),
+                op: Token::Asterisk,
+            })),
         );
     }
 

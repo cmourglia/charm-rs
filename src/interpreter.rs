@@ -205,10 +205,7 @@ fn unary_expr(right: &Box<Expr>, op: &Token) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        lexer::tokenize,
-        parser::{self, parse},
-    };
+    use crate::{lexer::tokenize, parser::parse};
 
     use super::*;
 
@@ -217,7 +214,7 @@ mod tests {
         assert_eq!(errors, vec![]);
 
         let program = parse(tokens);
-        assert_eq!(program.errors.len(), 0);
+        assert_eq!(program.errors, vec![]);
         assert_eq!(program.statements.len(), 1);
 
         match *program.statements[0] {
@@ -256,6 +253,9 @@ mod tests {
         test_eval_expression("336 / 8;", Value::Number(42.0));
 
         test_eval_expression("3 + 5 * 4 - 12 / 2;", Value::Number(17.0));
+
+        test_eval_expression("2 * 3 + 4;", Value::Number(10.0));
+        test_eval_expression("2 * (3 + 4);", Value::Number(14.0));
     }
 
     #[test]
