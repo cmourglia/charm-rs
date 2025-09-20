@@ -46,6 +46,11 @@ pub enum Stmt {
         body: Box<Stmt>,
     },
     Block(Vec<Box<Stmt>>),
+    If {
+        cond: Box<Expr>,
+        if_block: Box<Stmt>,
+        else_block: Option<Box<Stmt>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,6 +95,7 @@ pub enum ParseError {
         expected: Token,
         position: usize,
     },
+    Todo,
 }
 
 pub struct Program {
@@ -251,7 +257,27 @@ impl Parser {
     // if_stmt          -> "if" expression block_stmt
     //                     ( "else" if_stmt | block_stmt ) ? ;
     fn if_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
-        todo!()
+        self.consume(Token::If)?;
+
+        let cond = self.expression()?;
+
+        let if_block = self.block_stmt()?;
+
+        let mut else_block = None;
+
+        if self.matches(Token::Else) {
+            else_block = match self.current_token() {
+                Token::If => Some(self.if_stmt()?),
+                Token::OpenBrace => Some(self.block_stmt()?),
+                _ => return Err(ParseError::Todo),
+            };
+        }
+
+        return Ok(Box::new(Stmt::If {
+            cond,
+            if_block,
+            else_block,
+        }));
     }
 
     // while_stmt       -> "while" expression block_stmt ;
@@ -721,6 +747,68 @@ mod stmt_tests {
                 position: 6,
             }),
         );
+    }
+
+    #[test]
+    fn if_stmt() {
+        test_statement(
+            "if true {}",
+            Ok(Some(Box::new(Stmt::If {
+                cond: Box::new(Expr::Boolean(true)),
+                if_block: Box::new(Stmt::Block(vec![])),
+                else_block: None,
+            }))),
+        );
+
+        test_statement(
+            "if false {} else {}",
+            Ok(Some(Box::new(Stmt::If {
+                cond: Box::new(Expr::Boolean(false)),
+                if_block: Box::new(Stmt::Block(vec![])),
+                else_block: Some(Box::new(Stmt::Block(vec![]))),
+            }))),
+        );
+
+        test_statement(
+            "if false {} else if true {}",
+            Ok(Some(Box::new(Stmt::If {
+                cond: Box::new(Expr::Boolean(false)),
+                if_block: Box::new(Stmt::Block(vec![])),
+                else_block: Some(Box::new(Stmt::If {
+                    cond: Box::new(Expr::Boolean(true)),
+                    if_block: Box::new(Stmt::Block(vec![])),
+                    else_block: None,
+                })),
+            }))),
+        );
+
+        test_statement(
+            "if false {} else if true {} else if false {} else {}",
+            Ok(Some(Box::new(Stmt::If {
+                cond: Box::new(Expr::Boolean(false)),
+                if_block: Box::new(Stmt::Block(vec![])),
+                else_block: Some(Box::new(Stmt::If {
+                    cond: Box::new(Expr::Boolean(true)),
+                    if_block: Box::new(Stmt::Block(vec![])),
+                    else_block: Some(Box::new(Stmt::If {
+                        cond: Box::new(Expr::Boolean(false)),
+                        if_block: Box::new(Stmt::Block(vec![])),
+                        else_block: Some(Box::new(Stmt::Block(vec![]))),
+                    })),
+                })),
+            }))),
+        );
+
+        test_statement(
+            "if false else {}",
+            Err(ParseError::UnexpectedToken {
+                expected: Token::OpenBrace,
+                found: Token::Else,
+                position: 2,
+            }),
+        );
+
+        test_statement("if false {} else foo;", Err(ParseError::Todo));
     }
 
     // TODO: Test program
