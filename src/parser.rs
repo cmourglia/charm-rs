@@ -51,6 +51,10 @@ pub enum Stmt {
         if_block: Box<Stmt>,
         else_block: Option<Box<Stmt>>,
     },
+    While {
+        cond: Box<Expr>,
+        block: Box<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -282,7 +286,11 @@ impl Parser {
 
     // while_stmt       -> "while" expression block_stmt ;
     fn while_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
-        todo!()
+        self.consume(Token::While)?;
+        let cond = self.expression()?;
+        let block = self.block_stmt()?;
+
+        return Ok(Box::new(Stmt::While { cond, block }));
     }
 
     // for_stmt         -> "for" ( var_decl | expr_stmt | ";" )
@@ -829,6 +837,26 @@ mod stmt_tests {
         );
 
         test_statement("if false {} else foo;", Err(ParseError::Todo));
+    }
+
+    #[test]
+    fn while_stmt() {
+        test_statement(
+            "while true {}",
+            Ok(Some(Box::new(Stmt::While {
+                cond: Box::new(Expr::Boolean(true)),
+                block: Box::new(Stmt::Block(vec![])),
+            }))),
+        );
+
+        test_statement(
+            "while false;",
+            Err(ParseError::UnexpectedToken {
+                expected: Token::OpenBrace,
+                found: Token::Semicolon,
+                position: 2,
+            }),
+        );
     }
 
     // TODO: Test program
