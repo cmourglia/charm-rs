@@ -293,11 +293,56 @@ impl Parser {
         return Ok(Box::new(Stmt::While { cond, block }));
     }
 
-    // for_stmt         -> "for" ( var_decl | expr_stmt | ";" )
-    //                     expression? ";"
-    //                     expression? block_stmt ;
+    // for_stmt         -> "for" (
+    //                          ( var_decl | expr_stmt | ";" ) expression? ";" expression? )
+    //              TODO:     | ( identifier "in" identifier )
+    //                     ) block_stmt ;
     fn for_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
-        todo!()
+        // TODO: Handle `for i in v` at some point
+        self.consume(Token::For)?;
+
+        let init = match self.current_token() {
+            Token::Var => Some(self.var_decl()?),
+            Token::Semicolon => {
+                self.advance();
+                None
+            }
+            _ => Some(self.expr_stmt()?),
+        };
+
+        let cond = match self.current_token() {
+            Token::Semicolon => Box::new(Expr::Boolean(true)),
+            _ => self.expression()?,
+        };
+        self.consume(Token::Semicolon)?;
+
+        let increment = match self.current_token() {
+            Token::OpenBrace => None,
+            _ => Some(self.expression()?),
+        };
+
+        let body = self.block_stmt()?;
+
+        let mut statements = vec![];
+
+        if let Some(init) = init {
+            statements.push(init);
+        }
+
+        if let Stmt::Block(mut body) = *body {
+            if let Some(increment) = increment {
+                body.push(Box::new(Stmt::Expr(increment)));
+            }
+
+            statements.push(Box::new(Stmt::While {
+                cond,
+                block: Box::new(Stmt::Block(body)),
+            }));
+
+            return Ok(Box::new(Stmt::Block(statements)));
+        }
+
+        unreachable!();
     }
 
     // return_stmt      -> "return" expression? ";" ;
@@ -856,6 +901,76 @@ mod stmt_tests {
                 found: Token::Semicolon,
                 position: 2,
             }),
+        );
+    }
+
+    #[test]
+    fn for_stmt() {
+        test_statement(
+            "for ;; {}",
+            Ok(Some(Box::new(Stmt::Block(vec![Box::new(Stmt::While {
+                cond: Box::new(Expr::Boolean(true)),
+                block: Box::new(Stmt::Block(vec![])),
+            })])))),
+        );
+
+        test_statement(
+            "for i = 0;; {}",
+            Ok(Some(Box::new(Stmt::Block(vec![
+                Box::new(Stmt::Expr(Box::new(Expr::Assignment {
+                    identifier: "i".to_string(),
+                    value: Box::new(Expr::Number(0.0)),
+                }))),
+                Box::new(Stmt::While {
+                    cond: Box::new(Expr::Boolean(true)),
+                    block: Box::new(Stmt::Block(vec![])),
+                }),
+            ])))),
+        );
+
+        test_statement(
+            "for var i = 0;; {}",
+            Ok(Some(Box::new(Stmt::Block(vec![
+                Box::new(Stmt::VarDecl {
+                    identifier: "i".to_string(),
+                    expr: Some(Box::new(Expr::Number(0.0))),
+                }),
+                Box::new(Stmt::While {
+                    cond: Box::new(Expr::Boolean(true)),
+                    block: Box::new(Stmt::Block(vec![])),
+                }),
+            ])))),
+        );
+
+        test_statement(
+            "for var i = 0; i < 10; i = i + 1 { print(i); }",
+            Ok(Some(Box::new(Stmt::Block(vec![
+                Box::new(Stmt::VarDecl {
+                    identifier: "i".to_string(),
+                    expr: Some(Box::new(Expr::Number(0.0))),
+                }),
+                Box::new(Stmt::While {
+                    cond: Box::new(Expr::Binary {
+                        lhs: Box::new(Expr::Identifier("i".to_string())),
+                        rhs: Box::new(Expr::Number(10.0)),
+                        op: Token::Less,
+                    }),
+                    block: Box::new(Stmt::Block(vec![
+                        Box::new(Stmt::Expr(Box::new(Expr::Call {
+                            callee: "print".to_string(),
+                            arguments: vec![Box::new(Expr::Identifier("i".to_string()))],
+                        }))),
+                        Box::new(Stmt::Expr(Box::new(Expr::Assignment {
+                            identifier: "i".to_string(),
+                            value: Box::new(Expr::Binary {
+                                lhs: Box::new(Expr::Identifier("i".to_string())),
+                                rhs: Box::new(Expr::Number(1.0)),
+                                op: Token::Plus,
+                            }),
+                        }))),
+                    ])),
+                }),
+            ])))),
         );
     }
 
