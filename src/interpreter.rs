@@ -2,54 +2,98 @@ use crate::lexer::Token;
 use crate::parser::{Expr, Program, Stmt};
 use crate::value::Value;
 
-pub fn interpret(prg: &Program) {
-    for stmt in &prg.statements {
-        interpret_stmt(stmt);
+pub struct Context<W: std::io::Write = std::io::Stdout> {
+    writer: W,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        return Self::with_writer(std::io::stdout());
+    }
+
+    #[allow(unused)]
+    pub fn with_writer<W: std::io::Write>(writer: W) -> Context<W> {
+        return Context { writer };
     }
 }
 
-fn interpret_stmt(stmt: &Box<Stmt>) {
-    todo!();
+pub fn interpret(prg: &Program) {
+    let mut ctx = Context::new();
+
+    for stmt in &prg.statements {
+        interpret_stmt(&mut ctx, stmt);
+    }
 }
 
-fn interpret_expr(expr: &Box<Expr>) -> Value {
+fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) {
+    match **stmt {
+        Stmt::Expr(ref expr) => interpret_expr(ctx, &expr),
+        Stmt::VarDecl {
+            identifier: _,
+            expr: _,
+        } => todo!(),
+        Stmt::FunctionDecl {
+            identifier: _,
+            args: _,
+            body: _,
+        } => todo!(),
+        Stmt::Block(_) => todo!(),
+        Stmt::If {
+            cond: _,
+            if_block: _,
+            else_block: _,
+        } => todo!(),
+        Stmt::While { cond: _, block: _ } => todo!(),
+    };
+}
+
+fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Value {
     match **expr {
         Expr::Number(n) => Value::Number(n),
         Expr::Boolean(b) => Value::Boolean(b),
+        Expr::String(_) => todo!(),
+        Expr::Identifier(_) => todo!(),
 
-        Expr::Unary { ref rhs, ref op } => unary_expr(&rhs, op),
+        Expr::Unary { ref rhs, ref op } => unary_expr(ctx, &rhs, op),
 
         Expr::Binary {
             ref lhs,
             ref rhs,
             ref op,
-        } => binary_expr(&lhs, &rhs, op),
+        } => binary_expr(ctx, &lhs, &rhs, op),
 
-        _ => unreachable!(),
+        Expr::Assignment {
+            identifier: _,
+            value: _,
+        } => todo!(),
+        Expr::Call {
+            callee: _,
+            arguments: _,
+        } => todo!(),
     }
 }
 
-fn binary_expr(lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Token) -> Value {
+fn binary_expr(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Token) -> Value {
     match op {
-        Token::Plus => add(lhs, rhs),
-        Token::Minus => sub(lhs, rhs),
-        Token::Asterisk => mul(lhs, rhs),
-        Token::Slash => div(lhs, rhs),
-        Token::Greater => gt(lhs, rhs),
-        Token::GreaterEqual => ge(lhs, rhs),
-        Token::Less => lt(lhs, rhs),
-        Token::LessEqual => le(lhs, rhs),
-        Token::EqualEqual => eq(lhs, rhs),
-        Token::BangEqual => neq(lhs, rhs),
-        Token::Or => or(lhs, rhs),
-        Token::And => and(lhs, rhs),
+        Token::Plus => add(ctx, lhs, rhs),
+        Token::Minus => sub(ctx, lhs, rhs),
+        Token::Asterisk => mul(ctx, lhs, rhs),
+        Token::Slash => div(ctx, lhs, rhs),
+        Token::Greater => gt(ctx, lhs, rhs),
+        Token::GreaterEqual => ge(ctx, lhs, rhs),
+        Token::Less => lt(ctx, lhs, rhs),
+        Token::LessEqual => le(ctx, lhs, rhs),
+        Token::EqualEqual => eq(ctx, lhs, rhs),
+        Token::BangEqual => neq(ctx, lhs, rhs),
+        Token::Or => or(ctx, lhs, rhs),
+        Token::And => and(ctx, lhs, rhs),
         _ => unreachable!(),
     }
 }
 
-fn add(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn add(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs + rhs),
@@ -57,9 +101,9 @@ fn add(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn sub(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn sub(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs - rhs),
@@ -67,9 +111,9 @@ fn sub(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn mul(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn mul(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs * rhs),
@@ -77,9 +121,9 @@ fn mul(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn div(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn div(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Number(lhs / rhs),
@@ -87,15 +131,15 @@ fn div(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn and(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
+fn and(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
 
     if let Value::Boolean(lhs) = lhs {
         if !lhs {
             return Value::Boolean(false);
         }
 
-        let rhs = interpret_expr(rhs);
+        let rhs = interpret_expr(ctx, rhs);
 
         if let Value::Boolean(rhs) = rhs {
             Value::Boolean(lhs && rhs)
@@ -107,15 +151,15 @@ fn and(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn or(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
+fn or(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
 
     if let Value::Boolean(lhs) = lhs {
         if lhs {
             return Value::Boolean(true);
         }
 
-        let rhs = interpret_expr(rhs);
+        let rhs = interpret_expr(ctx, rhs);
 
         if let Value::Boolean(rhs) = rhs {
             Value::Boolean(lhs || rhs)
@@ -127,9 +171,9 @@ fn or(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn lt(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn lt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs < rhs),
@@ -137,9 +181,9 @@ fn lt(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn le(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn le(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs <= rhs),
@@ -147,9 +191,9 @@ fn le(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn gt(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn gt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs > rhs),
@@ -157,9 +201,9 @@ fn gt(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn ge(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn ge(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Value::Boolean(lhs >= rhs),
@@ -167,22 +211,22 @@ fn ge(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn eq(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn eq(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     return Value::Boolean(lhs == rhs);
 }
 
-fn neq(lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
-    let lhs = interpret_expr(lhs);
-    let rhs = interpret_expr(rhs);
+fn neq(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+    let lhs = interpret_expr(ctx, lhs);
+    let rhs = interpret_expr(ctx, rhs);
 
     return Value::Boolean(lhs != rhs);
 }
 
-fn unary_expr(right: &Box<Expr>, op: &Token) -> Value {
-    let right_value = interpret_expr(right);
+fn unary_expr(ctx: &mut Context, right: &Box<Expr>, op: &Token) -> Value {
+    let right_value = interpret_expr(ctx, right);
 
     match op {
         Token::Minus => {
