@@ -362,13 +362,19 @@ impl Parser {
         let current_index = self.current_index;
         let expr = self.logic_or()?;
 
-        if self.matches(Token::Equal) {
+        let token = self.current_token().clone();
+
+        if self.matches_any(&[
+            Token::Equal,
+            Token::PlusEqual,
+            Token::MinusEqual,
+            Token::AsteriskEqual,
+            Token::SlashEqual,
+        ]) {
             let value = self.logic_or()?;
 
-            match *expr {
-                Expr::Identifier(identifier) => {
-                    return Ok(Box::new(Expr::Assignment { identifier, value }));
-                }
+            let identifier = match *expr {
+                Expr::Identifier(identifier) => identifier,
                 _ => {
                     return Err(ParseError::UnexpectedToken {
                         expected: Token::Identifier("".to_string()),
@@ -376,8 +382,29 @@ impl Parser {
                         position: current_index,
                     });
                 }
+            };
+
+            if token == Token::Equal {
+                return Ok(Box::new(Expr::Assignment { identifier, value }));
             }
-        }
+
+            let op = match token {
+                Token::PlusEqual => Token::Plus,
+                Token::MinusEqual => Token::Minus,
+                Token::AsteriskEqual => Token::Asterisk,
+                Token::SlashEqual => Token::Slash,
+                _ => unreachable!(),
+            };
+
+            return Ok(Box::new(Expr::Assignment {
+                identifier: identifier.clone(),
+                value: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Identifier(identifier)),
+                    rhs: value,
+                    op: op,
+                }),
+            }));
+        };
 
         return Ok(expr);
     }
@@ -1246,6 +1273,57 @@ mod expr_tests {
                 found: Token::Number(27.0),
                 position: 0,
             }),
+        );
+    }
+
+    #[test]
+    fn desugared_assignment_expressions() {
+        test_expression(
+            "a += 2",
+            Ok(Box::new(Expr::Assignment {
+                identifier: "a".to_string(),
+                value: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Identifier("a".to_string())),
+                    rhs: Box::new(Expr::Number(2.0)),
+                    op: Token::Plus,
+                }),
+            })),
+        );
+
+        test_expression(
+            "a -= 2",
+            Ok(Box::new(Expr::Assignment {
+                identifier: "a".to_string(),
+                value: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Identifier("a".to_string())),
+                    rhs: Box::new(Expr::Number(2.0)),
+                    op: Token::Minus,
+                }),
+            })),
+        );
+
+        test_expression(
+            "a *= 2",
+            Ok(Box::new(Expr::Assignment {
+                identifier: "a".to_string(),
+                value: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Identifier("a".to_string())),
+                    rhs: Box::new(Expr::Number(2.0)),
+                    op: Token::Asterisk,
+                }),
+            })),
+        );
+
+        test_expression(
+            "a /= 2",
+            Ok(Box::new(Expr::Assignment {
+                identifier: "a".to_string(),
+                value: Box::new(Expr::Binary {
+                    lhs: Box::new(Expr::Identifier("a".to_string())),
+                    rhs: Box::new(Expr::Number(2.0)),
+                    op: Token::Slash,
+                }),
+            })),
         );
     }
 }
