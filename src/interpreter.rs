@@ -261,9 +261,11 @@ mod tests {
         assert_eq!(program.errors, vec![]);
         assert_eq!(program.statements.len(), 1);
 
+        let mut ctx = Context::new();
+
         match *program.statements[0] {
             Stmt::Expr(ref expr) => {
-                let value = interpret_expr(expr);
+                let value = interpret_expr(&mut ctx, expr);
                 assert_eq!(value, expected);
             }
             _ => assert!(false),
