@@ -1,4 +1,4 @@
-use crate::{interpreter::Interpreter, lexer::tokenize, parser::parse};
+use crate::{interpreter::interpret, lexer::tokenize, parser::parse};
 
 mod interpreter;
 mod lexer;
@@ -17,6 +17,5 @@ pub fn interpret_program(input: &str) {
 
     let program = parse(tokens);
 
-    let mut interpreter = Interpreter::new();
-    interpreter.run(&program);
+    interpret(&program);
 }

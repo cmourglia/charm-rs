@@ -17,7 +17,7 @@ impl From<io::Error> for RuntimeError {
     }
 }
 
-type NativeFunction = fn(&mut Interpreter, &[Value]) -> Result<Option<Value>, RuntimeError>;
+type NativeFunction = fn(&mut Context, &[Value]) -> Result<Option<Value>, RuntimeError>;
 
 #[derive(Debug, Clone)]
 enum Function {
@@ -102,46 +102,64 @@ impl FrameStack {
     }
 }
 
-fn native_print(ctx: &mut Interpreter, values: &[Value]) -> Result<Option<Value>, RuntimeError> {
-    writeln!(ctx.writer, "Hello, World!")?;
-    for v in values {
-        writeln!(ctx.writer, "{:?}", v)?;
-    }
-    return Ok(None);
-}
-
-pub struct Interpreter<W: std::io::Write> {
-    writer: W,
+pub struct Context {
+    writer: Box<dyn std::io::Write>,
     frames: FrameStack,
 }
 
-impl<W: std::io::Write> Interpreter<W> {
+impl Context {
     pub fn new() -> Self {
-        return Self::with_writer(std::io::stdout());
+        return Self::with_writer(Box::new(std::io::stdout()));
     }
 
     #[allow(unused)]
-    pub fn with_writer(writer: W) -> Self {
-        return Interpreter {
+    pub fn with_writer(writer: Box<dyn std::io::Write>) -> Context {
+        return Context {
             writer,
             frames: FrameStack::new(),
         };
     }
+}
 
-    pub fn run(&mut self, prg: &Program) {
-        // Global layer
-        self.frames.push_frame();
+fn native_print(ctx: &mut Context, values: &[Value]) -> Result<Option<Value>, RuntimeError> {
+    let mut first = true;
 
-        self.frames
-            .declare_function("print", &Function::Native(native_print));
-
-        for stmt in &prg.statements {
-            interpret_stmt(self, stmt);
+    for v in values {
+        if !first {
+            write!(ctx.writer, " ")?;
         }
+
+        match v {
+            Value::Nil => write!(ctx.writer, "<nil>")?,
+            Value::Number(n) => write!(ctx.writer, "{}", n)?,
+            Value::Boolean(b) => write!(ctx.writer, "{}", b)?,
+        }
+
+        first = false;
+    }
+
+    return Ok(None);
+}
+
+pub fn interpret(prg: &Program) {
+    let mut ctx = Context::new();
+
+    interpret_with_context(&mut ctx, prg);
+}
+
+fn interpret_with_context(ctx: &mut Context, prg: &Program) {
+    // Global layer
+    ctx.frames.push_frame();
+
+    ctx.frames
+        .declare_function("print", &Function::Native(native_print));
+
+    for stmt in &prg.statements {
+        interpret_stmt(ctx, stmt);
     }
 }
 
-fn interpret_stmt(ctx: &mut Interpreter, stmt: &Box<Stmt>) {
+fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) {
     match **stmt {
         Stmt::Expr(ref expr) => interpret_expr(ctx, &expr),
         Stmt::VarDecl {
@@ -163,7 +181,7 @@ fn interpret_stmt(ctx: &mut Interpreter, stmt: &Box<Stmt>) {
     };
 }
 
-fn interpret_expr(ctx: &mut Interpreter, expr: &Box<Expr>) -> Value {
+fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Value {
     match **expr {
         Expr::Number(n) => Value::Number(n),
         Expr::Boolean(b) => Value::Boolean(b),
@@ -182,14 +200,46 @@ fn interpret_expr(ctx: &mut Interpreter, expr: &Box<Expr>) -> Value {
             identifier: _,
             value: _,
         } => todo!(),
+
         Expr::Call {
-            callee: _,
-            arguments: _,
-        } => todo!(),
+            ref callee,
+            ref arguments,
+        } => {
+            let function = match ctx.frames.get_function(&callee) {
+                Some(function) => function.clone(),
+                None => todo!("error"),
+            };
+
+            let mut args = Vec::new();
+            for arg in arguments {
+                args.push(interpret_expr(ctx, arg));
+            }
+
+            ctx.frames.push_frame();
+
+            let result = match function {
+                Function::Native(function) => call_native_function(ctx, &function, &args),
+                Function::UserDefined { args, body } => Value::Nil,
+            };
+
+            ctx.frames.pop_frame();
+
+            result
+        }
     }
 }
 
-fn binary_expr(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Token) -> Value {
+fn call_native_function(
+    ctx: &mut Context,
+    function: &NativeFunction,
+    arguments: &[Value],
+) -> Value {
+    function(ctx, arguments);
+
+    return Value::Nil;
+}
+
+fn binary_expr(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Token) -> Value {
     match op {
         Token::Plus => add(ctx, lhs, rhs),
         Token::Minus => sub(ctx, lhs, rhs),
@@ -207,7 +257,7 @@ fn binary_expr(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>, op: &Tok
     }
 }
 
-fn add(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn add(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -217,7 +267,7 @@ fn add(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn sub(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn sub(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -227,7 +277,7 @@ fn sub(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn mul(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn mul(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -237,7 +287,7 @@ fn mul(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn div(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn div(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -247,7 +297,7 @@ fn div(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn and(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn and(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
 
     if let Value::Boolean(lhs) = lhs {
@@ -267,7 +317,7 @@ fn and(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn or(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn or(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
 
     if let Value::Boolean(lhs) = lhs {
@@ -287,7 +337,7 @@ fn or(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn lt(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn lt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -297,7 +347,7 @@ fn lt(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn le(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn le(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -307,7 +357,7 @@ fn le(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn gt(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn gt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -317,7 +367,7 @@ fn gt(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn ge(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn ge(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
@@ -327,21 +377,21 @@ fn ge(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     }
 }
 
-fn eq(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn eq(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
     return Value::Boolean(lhs == rhs);
 }
 
-fn neq(ctx: &mut Interpreter, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
+fn neq(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Value {
     let lhs = interpret_expr(ctx, lhs);
     let rhs = interpret_expr(ctx, rhs);
 
     return Value::Boolean(lhs != rhs);
 }
 
-fn unary_expr(ctx: &mut Interpreter, right: &Box<Expr>, op: &Token) -> Value {
+fn unary_expr(ctx: &mut Context, right: &Box<Expr>, op: &Token) -> Value {
     let right_value = interpret_expr(ctx, right);
 
     match op {
@@ -413,18 +463,21 @@ mod program_tests {
         assert_eq!(program.statements.len(), 1);
 
         let writer = TestWriter::new();
-        let mut interpreter = Interpreter::with_writer(writer.clone());
+        let mut ctx = Context::with_writer(Box::new(writer.clone()));
 
-        interpreter.run(&program);
+        interpret_with_context(&mut ctx, &program);
 
         let output = writer.get_output();
+
+        println!("{}", output);
 
         assert_eq!(expected, output);
     }
 
     #[test]
-    fn testtest() {
-        test_program_output("print(42);", "");
+    fn print_call() {
+        test_program_output("print(42);", "42");
+        test_program_output("print(42, 43, 44);", "42 43 44");
     }
 }
 
@@ -442,7 +495,7 @@ mod expression_tests {
         assert_eq!(program.errors, vec![]);
         assert_eq!(program.statements.len(), 1);
 
-        let mut ctx = Interpreter::new();
+        let mut ctx = Context::new();
 
         match *program.statements[0] {
             Stmt::Expr(ref expr) => {
