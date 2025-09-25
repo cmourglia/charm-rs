@@ -55,6 +55,7 @@ pub enum Stmt {
         cond: Box<Expr>,
         block: Box<Stmt>,
     },
+    Return(Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -347,7 +348,17 @@ impl Parser {
 
     // return_stmt      -> "return" expression? ";" ;
     fn return_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
-        todo!()
+        self.consume(Token::Return)?;
+
+        let mut expr = None;
+
+        if !self.check(Token::Semicolon) {
+            expr = Some(self.expression()?);
+        }
+
+        self.consume(Token::Semicolon)?;
+
+        return Ok(Box::new(Stmt::Return(expr)));
     }
 
     // expression   -> assignment ;
@@ -995,6 +1006,18 @@ mod stmt_tests {
                 }),
             ])))),
         );
+    }
+
+    #[test]
+    fn return_stmt() {
+        test_statement(
+            "return 42;",
+            Ok(Some(Box::new(Stmt::Return(Some(Box::new(Expr::Number(
+                42.0,
+            ))))))),
+        );
+
+        test_statement("return;", Ok(Some(Box::new(Stmt::Return(None)))));
     }
 
     // TODO: Test program

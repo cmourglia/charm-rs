@@ -20,7 +20,12 @@ impl From<io::Error> for RuntimeError {
     }
 }
 
-type NativeFunction = fn(&mut Context, &[Value]) -> Result<Value, RuntimeError>;
+type NativeFunction = fn(&mut Context, &[Value]) -> Result<FlowControl, RuntimeError>;
+
+enum FlowControl {
+    None,
+    Return(Value),
+}
 
 #[derive(Debug, Clone)]
 enum Function {
@@ -124,7 +129,7 @@ impl Context {
     }
 }
 
-fn native_print(ctx: &mut Context, values: &[Value]) -> Result<Value, RuntimeError> {
+fn native_print(ctx: &mut Context, values: &[Value]) -> Result<FlowControl, RuntimeError> {
     let mut first = true;
 
     for v in values {
@@ -143,7 +148,7 @@ fn native_print(ctx: &mut Context, values: &[Value]) -> Result<Value, RuntimeErr
 
     writeln!(ctx.writer, "")?;
 
-    return Ok(Value::Nil);
+    return Ok(FlowControl::None);
 }
 
 pub fn interpret(prg: &Program) {
@@ -161,7 +166,7 @@ fn interpret_with_context(ctx: &mut Context, prg: &Program) {
 
     for stmt in &prg.statements {
         match interpret_stmt(ctx, stmt) {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(err) => {
                 println!("Runtime error: {:?}", err);
                 break;
@@ -170,20 +175,30 @@ fn interpret_with_context(ctx: &mut Context, prg: &Program) {
     }
 }
 
-fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<(), RuntimeError> {
-    match **stmt {
+fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, RuntimeError> {
+    let result = match **stmt {
         Stmt::Expr(ref expr) => {
             interpret_expr(ctx, expr)?;
+            FlowControl::None
         }
 
         Stmt::Block(ref stmts) => {
             ctx.frames.push_frame();
 
+            let mut block_result = FlowControl::None;
+
             for stmt in stmts {
-                interpret_stmt(ctx, stmt)?;
+                block_result = interpret_stmt(ctx, stmt)?;
+
+                match &block_result {
+                    FlowControl::Return(_) => break,
+                    FlowControl::None => {}
+                }
             }
 
             ctx.frames.pop_frame();
+
+            block_result
         }
 
         Stmt::VarDecl {
@@ -196,6 +211,8 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<(), RuntimeErro
             };
 
             ctx.frames.declare_variable(&identifier, value);
+
+            FlowControl::None
         }
 
         Stmt::FunctionDecl {
@@ -212,7 +229,7 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<(), RuntimeErro
         Stmt::While { cond: _, block: _ } => todo!(),
     };
 
-    return Ok(());
+    return Ok(result);
 }
 
 fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Result<Value, RuntimeError> {
