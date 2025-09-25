@@ -4,12 +4,14 @@ use std::io::{self, Write};
 use crate::lexer::Token;
 use crate::parser::{Expr, Program, Stmt};
 use crate::value::Value;
+use crate::variant_eq;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeError {
     IoError(String),
     VariableNotDeclared(String),
     FunctionNotDeclared(String),
+    TypeMismatch { old_value: Value, new_value: Value },
 }
 
 impl From<io::Error> for RuntimeError {
@@ -72,10 +74,10 @@ impl FrameStack {
             .insert(name.to_string(), value);
     }
 
-    pub fn set_variable(&mut self, name: &str, value: &Value) -> Result<(), RuntimeError> {
+    pub fn set_variable(&mut self, name: &str, value: Value) -> Result<(), RuntimeError> {
         for frame in self.frames.iter_mut().rev() {
             if let Some(v) = frame.variables.get_mut(&name.to_string()) {
-                *v = value.clone();
+                *v = value;
                 return Ok(());
             }
         }
@@ -219,7 +221,7 @@ fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Result<Value, RuntimeE
         Expr::Boolean(b) => Ok(Value::Boolean(b)),
         Expr::String(_) => todo!(),
 
-        Expr::Identifier(ref name) => Ok(ctx.frames.get_variable(&name)?.clone()),
+        Expr::Identifier(ref name) => Ok(ctx.frames.get_variable(&name)?),
 
         Expr::Unary { ref rhs, ref op } => Ok(unary_expr(ctx, &rhs, op)?),
 
@@ -230,9 +232,24 @@ fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Result<Value, RuntimeE
         } => Ok(binary_expr(ctx, &lhs, &rhs, op)?),
 
         Expr::Assignment {
-            identifier: _,
-            value: _,
-        } => todo!(),
+            ref identifier,
+            ref value,
+        } => {
+            let new_value = interpret_expr(ctx, value)?;
+
+            let old_value = ctx.frames.get_variable(&identifier)?;
+
+            if old_value != Value::Nil && !variant_eq(&old_value, &new_value) {
+                return Err(RuntimeError::TypeMismatch {
+                    old_value,
+                    new_value,
+                });
+            }
+
+            ctx.frames.set_variable(&identifier, new_value.clone())?;
+
+            Ok(new_value)
+        }
 
         Expr::Call {
             ref callee,
@@ -530,6 +547,15 @@ mod program_tests {
             print(a);
             "#,
             "43\n42\n",
+        );
+
+        test_program_output(
+            r#"
+        var a = 42;
+        a = 43;
+        print(a);
+        "#,
+            "43\n",
         );
     }
 }

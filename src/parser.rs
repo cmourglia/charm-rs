@@ -30,7 +30,7 @@
 // primary      -> NUMBER | STRING | "true" | "false" | "nil"
 //               | "(" expression ")" | IDENTIFIER;
 
-use crate::lexer::Token;
+use crate::{lexer::Token, variant_eq};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
@@ -669,10 +669,6 @@ impl Parser {
 
         return self.current_token();
     }
-}
-
-fn variant_eq<T>(a: &T, b: &T) -> bool {
-    return std::mem::discriminant(a) == std::mem::discriminant(b);
 }
 
 #[cfg(test)]

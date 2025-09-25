@@ -19,3 +19,7 @@ pub fn interpret_program(input: &str) {
 
     interpret(&program);
 }
+
+fn variant_eq<T>(a: &T, b: &T) -> bool {
+    return std::mem::discriminant(a) == std::mem::discriminant(b);
+}
