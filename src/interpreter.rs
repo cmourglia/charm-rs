@@ -236,9 +236,39 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
 
             flow_control
         }
+
+        Stmt::While {
+            ref cond,
+            ref block,
+        } => interpret_while(ctx, cond, block)?,
+
+        Stmt::Return(ref expr) => {
+            if let Some(expr) = expr {
+                FlowControl::Return(interpret_expr(ctx, expr)?)
+            } else {
+                FlowControl::Return(Value::Nil)
+            }
+        }
     };
 
     return Ok(result);
+}
+
+fn interpret_while(
+    ctx: &mut Context,
+    cond: &Box<Expr>,
+    body: &Box<Stmt>,
+) -> Result<FlowControl, RuntimeError> {
+    while interpret_expr(ctx, cond)?.is_truthy() {
+        match interpret_stmt(ctx, body)? {
+            FlowControl::None => continue,
+            // TODO: Handle continue
+            // TODO: Handle break
+            FlowControl::Return(val) => return Ok(FlowControl::Return(val)),
+        }
+    }
+
+    return Ok(FlowControl::None);
 }
 
 fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Result<Value, RuntimeError> {
@@ -630,6 +660,33 @@ mod program_tests {
                 print(a);
             }"#,
             "2\n",
+        );
+    }
+
+    #[test]
+    fn while_stmt() {
+        test_program_output(
+            r#"
+            var a = 0;
+            while a < 5 {
+                print(a);
+                a += 1;
+            }"#,
+            "0\n1\n2\n3\n4\n",
+        );
+
+        test_program_output(
+            r#"
+            var a = 0;
+            while a < 10 {
+                if a == 5 {
+                    return;
+                }
+
+                print(a);
+                a += 1;
+            }"#,
+            "0\n1\n2\n3\n4\n",
         );
     }
 }
