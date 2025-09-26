@@ -114,6 +114,7 @@ impl FrameStack {
 pub struct Context {
     writer: Box<dyn std::io::Write>,
     frames: FrameStack,
+    epoch: std::time::Instant,
 }
 
 impl Context {
@@ -126,6 +127,7 @@ impl Context {
         return Context {
             writer,
             frames: FrameStack::new(),
+            epoch: std::time::Instant::now(),
         };
     }
 }
@@ -152,6 +154,14 @@ fn native_print(ctx: &mut Context, values: &[Value]) -> Result<FlowControl, Runt
     return Ok(FlowControl::None);
 }
 
+fn native_time(ctx: &mut Context, _: &[Value]) -> Result<FlowControl, RuntimeError> {
+    let now = std::time::Instant::now();
+
+    let elapsed = now.duration_since(ctx.epoch).as_nanos() as f64;
+
+    return Ok(FlowControl::Return(Value::Number(elapsed)));
+}
+
 pub fn interpret(prg: &Program) {
     let mut ctx = Context::new();
 
@@ -164,6 +174,8 @@ fn interpret_with_context(ctx: &mut Context, prg: &Program) {
 
     ctx.frames
         .declare_function("print", &Function::Native(native_print));
+    ctx.frames
+        .declare_function("time", &Function::Native(native_time));
 
     for stmt in &prg.statements {
         match interpret_stmt(ctx, stmt) {
