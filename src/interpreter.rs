@@ -222,11 +222,20 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
         } => todo!(),
 
         Stmt::If {
-            cond: _,
-            if_block: _,
-            else_block: _,
-        } => todo!(),
-        Stmt::While { cond: _, block: _ } => todo!(),
+            ref cond,
+            ref if_block,
+            ref else_block,
+        } => {
+            let flow_control = if interpret_expr(ctx, cond)?.is_truthy() {
+                interpret_stmt(ctx, if_block)?
+            } else if let Some(else_block) = else_block {
+                interpret_stmt(ctx, else_block)?
+            } else {
+                FlowControl::None
+            };
+
+            flow_control
+        }
     };
 
     return Ok(result);
@@ -573,6 +582,54 @@ mod program_tests {
         print(a);
         "#,
             "43\n",
+        );
+    }
+
+    #[test]
+    fn if_stmt() {
+        test_program_output(
+            r#"
+            var a = 1;
+            if a == 1 {
+                print(a);
+            }
+
+            if a == 2 {
+                print(a, a);
+            }
+            "#,
+            "1\n",
+        );
+
+        test_program_output(
+            r#"
+            var a = 1;
+            if a == 0 {
+            } else { 
+                print(a);
+            }"#,
+            "1\n",
+        );
+
+        test_program_output(
+            r#"
+            var a = 1;
+            if a == 0 {
+            } else if a == 1{ 
+                print(a);
+            }"#,
+            "1\n",
+        );
+
+        test_program_output(
+            r#"
+            var a = 2;
+            if a == 0 {
+            } else if a == 1 {
+            } else if a == 2 {
+                print(a);
+            }"#,
+            "2\n",
         );
     }
 }
