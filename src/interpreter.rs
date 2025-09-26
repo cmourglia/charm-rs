@@ -12,6 +12,7 @@ pub enum RuntimeError {
     VariableNotDeclared(String),
     FunctionNotDeclared(String),
     TypeMismatch { old_value: Value, new_value: Value },
+    InvalidNumberOfParameters,
 }
 
 impl From<io::Error> for RuntimeError {
@@ -216,10 +217,19 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
         }
 
         Stmt::FunctionDecl {
-            identifier: _,
-            args: _,
-            body: _,
-        } => todo!(),
+            ref identifier,
+            ref args,
+            ref body,
+        } => {
+            let function = Function::UserDefined {
+                args: args.clone(),
+                body: body.clone(),
+            };
+
+            ctx.frames.declare_function(&identifier, &function);
+
+            FlowControl::None
+        }
 
         Stmt::If {
             ref cond,
@@ -321,25 +331,40 @@ fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Result<Value, RuntimeE
             ctx.frames.push_frame();
 
             let result = match function {
-                Function::Native(function) => call_native_function(ctx, &function, &args)?,
-                Function::UserDefined { args, body } => Value::Nil,
+                Function::Native(function) => function(ctx, &args)?,
+                Function::UserDefined {
+                    args: ref params,
+                    ref body,
+                } => call_user_function(ctx, &params, &args, body)?,
             };
 
             ctx.frames.pop_frame();
 
-            Ok(result)
+            match result {
+                FlowControl::Return(retval) => Ok(retval),
+                _ => Ok(Value::Nil),
+            }
         }
     }
 }
 
-fn call_native_function(
+fn call_user_function(
     ctx: &mut Context,
-    function: &NativeFunction,
-    arguments: &[Value],
-) -> Result<Value, RuntimeError> {
-    function(ctx, arguments)?;
+    params: &[String],
+    args: &[Value],
+    body: &Box<Stmt>,
+) -> Result<FlowControl, RuntimeError> {
+    let arity = args.len();
 
-    return Ok(Value::Nil);
+    if params.len() != arity {
+        return Err(RuntimeError::InvalidNumberOfParameters);
+    }
+
+    for i in 0..arity {
+        ctx.frames.declare_variable(&params[i], args[i].clone());
+    }
+
+    return interpret_stmt(ctx, body);
 }
 
 fn binary_expr(
@@ -687,6 +712,43 @@ mod program_tests {
                 a += 1;
             }"#,
             "0\n1\n2\n3\n4\n",
+        );
+    }
+
+    #[test]
+    fn functions() {
+        test_program_output(
+            r#"
+            fn foo(a) {
+                print(a);
+            }
+
+            foo(42);"#,
+            "42\n",
+        );
+
+        test_program_output(
+            r#"
+            fn foo(a) { 
+                return a * 2;
+            }
+
+            print(foo(21));"#,
+            "42\n",
+        );
+
+        test_program_output(
+            r#"
+            fn fib(n) {
+                if n == 0 { return 0; }
+                if n == 1 { return 1; }
+
+                return fib(n-1) + fib(n - 2);
+            }
+
+            print(fib(23));
+            "#,
+            "28657\n",
         );
     }
 }

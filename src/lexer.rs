@@ -76,7 +76,7 @@ static KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
     "struct" => Token::Struct,
     "super" => Token::Super,
     "this" => Token::This,
-    "function" => Token::Function,
+    "fn" => Token::Function,
     "return" => Token::Return,
 };
 
@@ -445,7 +445,7 @@ abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_
     #[test]
     fn keywords() {
         let str = r#"
-and struct else false for function if nil not or return super this true var while 
+and struct else false for fn if nil not or return super this true var while 
         "#;
 
         let (tokens, errors) = tokenize(str);

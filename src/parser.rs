@@ -820,7 +820,7 @@ mod stmt_tests {
     #[test]
     fn function_decl() {
         test_statement(
-            "function foo() {}",
+            "fn foo() {}",
             Ok(Some(Box::new(Stmt::FunctionDecl {
                 identifier: "foo".to_string(),
                 args: vec![],
@@ -829,7 +829,7 @@ mod stmt_tests {
         );
 
         test_statement(
-            "function foo(a) {}",
+            "fn foo(a) {}",
             Ok(Some(Box::new(Stmt::FunctionDecl {
                 identifier: "foo".to_string(),
                 args: vec!["a".to_string()],
@@ -838,7 +838,7 @@ mod stmt_tests {
         );
 
         test_statement(
-            "function foo(bar, baz) {}",
+            "fn foo(bar, baz) {}",
             Ok(Some(Box::new(Stmt::FunctionDecl {
                 identifier: "foo".to_string(),
                 args: vec!["bar".to_string(), "baz".to_string()],
@@ -847,7 +847,7 @@ mod stmt_tests {
         );
 
         test_statement(
-            "function foo(bar, baz {}",
+            "fn foo(bar, baz {}",
             Err(ParseError::UnexpectedToken {
                 expected: Token::CloseParen,
                 found: Token::OpenBrace,
