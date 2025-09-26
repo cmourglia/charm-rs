@@ -12,3 +12,12 @@ pub enum Value {
     // But this will do for now
     // ...
 }
+
+impl Value {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Self::Boolean(b) => *b,
+            _ => false,
+        }
+    }
+}
