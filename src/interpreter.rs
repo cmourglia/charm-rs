@@ -757,9 +757,9 @@ mod program_tests {
                 return fib(n-1) + fib(n - 2);
             }
 
-            print(fib(23));
+            print(fib(15));
             "#,
-            "28657\n",
+            "610\n",
         );
     }
 }

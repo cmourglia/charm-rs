@@ -1026,29 +1026,31 @@ mod stmt_tests {
 }
 
 #[cfg(test)]
-#[cfg(any())]
 mod expr_tests {
     use crate::lexer::tokenize;
 
     use super::*;
 
-    fn test_expression(input: &str, expected: Result<usize, ParseError>) {
+    fn test_expression(input: &str, expected: Result<Vec<Expr>, ParseError>) {
         let (tokens, errors) = tokenize(input);
         assert_eq!(errors, vec![]);
 
         let mut parser = Parser::new(tokens);
         let expr = parser.expression();
 
-        assert_eq!(expr, expected);
+        match expr {
+            Ok(_) => assert_eq!(parser.expressions, expected.unwrap()),
+            Err(err) => assert_eq!(err, expected.unwrap_err()),
+        }
     }
 
     #[test]
     fn primary_expressions() {
-        test_expression("42", Ok(Box::new(Expr::Number(42.0))));
-        test_expression("true", Ok(Box::new(Expr::Boolean(true))));
+        test_expression("42", Ok(vec![Expr::Number(42.0)]));
+        test_expression("true", Ok(vec![Expr::Boolean(true)]));
         test_expression(
             "\"hello, world\"",
-            Ok(Box::new(Expr::String("hello, world".into()))),
+            Ok(vec![Expr::String("hello, world".into())]),
         );
 
         test_expression(
@@ -1062,18 +1064,24 @@ mod expr_tests {
 
     #[test]
     fn grouped_expressions() {
-        test_expression("(42)", Ok(Box::new(Expr::Number(42.0))));
+        test_expression("(42)", Ok(vec![Expr::Number(42.0)]));
         test_expression(
             "1 * (2 + 3)",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(1.0)),
-                rhs: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Number(2.0)),
-                    rhs: Box::new(Expr::Number(3.0)),
+            Ok(vec![
+                Expr::Number(1.0),
+                Expr::Number(2.0),
+                Expr::Number(3.0),
+                Expr::Binary {
+                    lhs: 1,
+                    rhs: 2,
                     op: Token::Plus,
-                }),
-                op: Token::Asterisk,
-            })),
+                },
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 3,
+                    op: Token::Asterisk,
+                },
+            ]),
         );
     }
 
@@ -1081,18 +1089,24 @@ mod expr_tests {
     fn unary_expressions() {
         test_expression(
             "-42",
-            Ok(Box::new(Expr::Unary {
-                rhs: Box::new(Expr::Number(42.0)),
-                op: Token::Minus,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Unary {
+                    rhs: 0,
+                    op: Token::Minus,
+                },
+            ]),
         );
 
         test_expression(
             "not false",
-            Ok(Box::new(Expr::Unary {
-                rhs: Box::new(Expr::Boolean(false)),
-                op: Token::Not,
-            })),
+            Ok(vec![
+                Expr::Boolean(false),
+                Expr::Unary {
+                    rhs: 0,
+                    op: Token::Not,
+                },
+            ]),
         );
     }
 
@@ -1100,20 +1114,28 @@ mod expr_tests {
     fn term_expressions() {
         test_expression(
             "1 + 2",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(1.0)),
-                rhs: Box::new(Expr::Number(2.0)),
-                op: Token::Plus,
-            })),
+            Ok(vec![
+                Expr::Number(1.0),
+                Expr::Number(2.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Plus,
+                },
+            ]),
         );
 
         test_expression(
             "4.2 - 13.37",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(4.2)),
-                rhs: Box::new(Expr::Number(13.37)),
-                op: Token::Minus,
-            })),
+            Ok(vec![
+                Expr::Number(4.2),
+                Expr::Number(13.37),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Minus,
+                },
+            ]),
         );
     }
 
@@ -1121,20 +1143,28 @@ mod expr_tests {
     fn factor_expressions() {
         test_expression(
             "2 * 3",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(2.0)),
-                rhs: Box::new(Expr::Number(3.0)),
-                op: Token::Asterisk,
-            })),
+            Ok(vec![
+                Expr::Number(2.0),
+                Expr::Number(3.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Asterisk,
+                },
+            ]),
         );
 
         test_expression(
             "7 / 4",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(7.0)),
-                rhs: Box::new(Expr::Number(4.0)),
-                op: Token::Slash,
-            })),
+            Ok(vec![
+                Expr::Number(7.0),
+                Expr::Number(4.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Slash,
+                },
+            ]),
         );
     }
 
@@ -1142,11 +1172,15 @@ mod expr_tests {
     fn logic_or_expressions() {
         test_expression(
             "true or false",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Boolean(true)),
-                rhs: Box::new(Expr::Boolean(false)),
-                op: Token::Or,
-            })),
+            Ok(vec![
+                Expr::Boolean(true),
+                Expr::Boolean(false),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Or,
+                },
+            ]),
         );
     }
 
@@ -1154,11 +1188,15 @@ mod expr_tests {
     fn logic_and_expressions() {
         test_expression(
             "false and true",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Boolean(false)),
-                rhs: Box::new(Expr::Boolean(true)),
-                op: Token::And,
-            })),
+            Ok(vec![
+                Expr::Boolean(false),
+                Expr::Boolean(true),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::And,
+                },
+            ]),
         );
     }
 
@@ -1166,20 +1204,28 @@ mod expr_tests {
     fn equality_expressions() {
         test_expression(
             "33.0 == false",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(33.0)),
-                rhs: Box::new(Expr::Boolean(false)),
-                op: Token::EqualEqual,
-            })),
+            Ok(vec![
+                Expr::Number(33.0),
+                Expr::Boolean(false),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::EqualEqual,
+                },
+            ]),
         );
 
         test_expression(
             "\"hello\" != \"test\"",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::String("hello".into())),
-                rhs: Box::new(Expr::String("test".into())),
-                op: Token::BangEqual,
-            })),
+            Ok(vec![
+                Expr::String("hello".into()),
+                Expr::String("test".into()),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::BangEqual,
+                },
+            ]),
         );
     }
 
@@ -1187,38 +1233,54 @@ mod expr_tests {
     fn comparison_expressions() {
         test_expression(
             "42 > 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::Greater,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Greater,
+                },
+            ]),
         );
 
         test_expression(
             "42 >= 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::GreaterEqual,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::GreaterEqual,
+                },
+            ]),
         );
 
         test_expression(
             "42 < 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::Less,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Less,
+                },
+            ]),
         );
 
         test_expression(
             "42 <= 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::LessEqual,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::LessEqual,
+                },
+            ]),
         );
     }
 
@@ -1226,25 +1288,32 @@ mod expr_tests {
     fn call_expressions() {
         test_expression(
             "foo()",
-            Ok(Box::new(Expr::Call {
-                callee: "foo".to_string(),
-                arguments: vec![],
-            })),
+            Ok(vec![
+                Expr::Identifier("foo".to_string()),
+                Expr::Call {
+                    callee: "foo".to_string(),
+                    arguments: vec![],
+                },
+            ]),
         );
 
         test_expression(
             "bar(\"test\", 39 + 3)",
-            Ok(Box::new(Expr::Call {
-                callee: "bar".to_string(),
-                arguments: vec![
-                    Box::new(Expr::String("test".to_string())),
-                    Box::new(Expr::Binary {
-                        lhs: Box::new(Expr::Number(39.0)),
-                        rhs: Box::new(Expr::Number(3.0)),
-                        op: Token::Plus,
-                    }),
-                ],
-            })),
+            Ok(vec![
+                Expr::Identifier("bar".to_string()),
+                Expr::String("test".to_string()),
+                Expr::Number(39.0),
+                Expr::Number(3.0),
+                Expr::Binary {
+                    lhs: 2,
+                    rhs: 3,
+                    op: Token::Plus,
+                },
+                Expr::Call {
+                    callee: "bar".to_string(),
+                    arguments: vec![1, 4],
+                },
+            ]),
         );
 
         test_expression(
@@ -1270,22 +1339,34 @@ mod expr_tests {
     fn assignment_expressions() {
         test_expression(
             "a = 42",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Number(42.0)),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(42.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::Equal,
+                },
+            ]),
         );
 
         test_expression(
             "foo=15+27",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "foo".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Number(15.0)),
-                    rhs: Box::new(Expr::Number(27.0)),
+            Ok(vec![
+                Expr::Identifier("foo".to_string()),
+                Expr::Number(15.0),
+                Expr::Number(27.0),
+                Expr::Binary {
+                    lhs: 1,
+                    rhs: 2,
                     op: Token::Plus,
-                }),
-            })),
+                },
+                Expr::Assignment {
+                    identifier: "foo".to_string(),
+                    value: 3,
+                    op: Token::Equal,
+                },
+            ]),
         );
 
         test_expression(
@@ -1296,56 +1377,57 @@ mod expr_tests {
                 position: 0,
             }),
         );
-    }
 
-    #[test]
-    fn desugared_assignment_expressions() {
         test_expression(
             "a += 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Plus,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::PlusEqual,
+                },
+            ]),
         );
 
         test_expression(
             "a -= 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Minus,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::MinusEqual,
+                },
+            ]),
         );
 
         test_expression(
             "a *= 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Asterisk,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::AsteriskEqual,
+                },
+            ]),
         );
 
         test_expression(
             "a /= 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Slash,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::SlashEqual,
+                },
+            ]),
         );
     }
 }
