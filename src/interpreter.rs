@@ -111,23 +111,26 @@ impl FrameStack {
     }
 }
 
-pub struct Context {
+pub struct Context<'a> {
     writer: Box<dyn std::io::Write>,
     frames: FrameStack,
     epoch: std::time::Instant,
+
+    expr_pool: &'a [Expr],
 }
 
-impl Context {
+impl<'a> Context<'a> {
     pub fn new() -> Self {
         return Self::with_writer(Box::new(std::io::stdout()));
     }
 
     #[allow(unused)]
-    pub fn with_writer(writer: Box<dyn std::io::Write>) -> Context {
+    pub fn with_writer(writer: Box<dyn std::io::Write>) -> Context<'a> {
         return Context {
             writer,
             frames: FrameStack::new(),
             epoch: std::time::Instant::now(),
+            expr_pool: Default::default(),
         };
     }
 }
@@ -168,7 +171,7 @@ pub fn interpret(prg: &Program) {
     interpret_with_context(&mut ctx, prg);
 }
 
-fn interpret_with_context(ctx: &mut Context, prg: &Program) {
+fn interpret_with_context<'a>(ctx: &'a mut Context<'a>, prg: &'a Program) {
     // Global layer
     ctx.frames.push_frame();
 
@@ -176,6 +179,8 @@ fn interpret_with_context(ctx: &mut Context, prg: &Program) {
         .declare_function("print", &Function::Native(native_print));
     ctx.frames
         .declare_function("time", &Function::Native(native_time));
+
+    ctx.expr_pool = &prg.expressions;
 
     for stmt in &prg.statements {
         match interpret_stmt(ctx, stmt) {
@@ -190,7 +195,7 @@ fn interpret_with_context(ctx: &mut Context, prg: &Program) {
 
 fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, RuntimeError> {
     let result = match **stmt {
-        Stmt::Expr(ref expr) => {
+        Stmt::Expr(expr) => {
             interpret_expr(ctx, expr)?;
             FlowControl::None
         }
@@ -216,7 +221,7 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
 
         Stmt::VarDecl {
             ref identifier,
-            ref expr,
+            expr,
         } => {
             let value = match expr {
                 Some(expr) => interpret_expr(ctx, expr)?,
@@ -244,7 +249,7 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
         }
 
         Stmt::If {
-            ref cond,
+            cond,
             ref if_block,
             ref else_block,
         } => {
@@ -259,12 +264,9 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
             flow_control
         }
 
-        Stmt::While {
-            ref cond,
-            ref block,
-        } => interpret_while(ctx, cond, block)?,
+        Stmt::While { cond, ref block } => interpret_while(ctx, cond, block)?,
 
-        Stmt::Return(ref expr) => {
+        Stmt::Return(expr) => {
             if let Some(expr) = expr {
                 FlowControl::Return(interpret_expr(ctx, expr)?)
             } else {
@@ -278,7 +280,7 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
 
 fn interpret_while(
     ctx: &mut Context,
-    cond: &Box<Expr>,
+    cond: usize,
     body: &Box<Stmt>,
 ) -> Result<FlowControl, RuntimeError> {
     while interpret_expr(ctx, cond)?.is_truthy() {
@@ -293,27 +295,27 @@ fn interpret_while(
     return Ok(FlowControl::None);
 }
 
-fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Result<Value, RuntimeError> {
-    match **expr {
-        Expr::Number(n) => Ok(Value::Number(n)),
-        Expr::Boolean(b) => Ok(Value::Boolean(b)),
+fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError> {
+    match &ctx.expr_pool[expr] {
+        Expr::Number(n) => Ok(Value::Number(*n)),
+        Expr::Boolean(b) => Ok(Value::Boolean(*b)),
         Expr::String(_) => todo!(),
 
-        Expr::Identifier(ref name) => Ok(ctx.frames.get_variable(&name)?),
+        Expr::Identifier(name) => Ok(ctx.frames.get_variable(&name)?),
 
-        Expr::Unary { ref rhs, ref op } => Ok(unary_expr(ctx, &rhs, op)?),
+        Expr::Unary { rhs, op } => Ok(unary_expr(ctx, *rhs, op)?),
 
-        Expr::Binary {
-            ref lhs,
-            ref rhs,
-            ref op,
-        } => Ok(binary_expr(ctx, &lhs, &rhs, op)?),
+        Expr::Binary { lhs, rhs, op } => Ok(binary_expr(ctx, *lhs, *rhs, op)?),
 
         Expr::Assignment {
-            ref identifier,
-            ref value,
+            identifier,
+            value,
+            op,
         } => {
-            let new_value = interpret_expr(ctx, value)?;
+            if op != &Token::Equal {
+                todo!();
+            }
+            let new_value = interpret_expr(ctx, *value)?;
 
             let old_value = ctx.frames.get_variable(&identifier)?;
 
@@ -329,15 +331,12 @@ fn interpret_expr(ctx: &mut Context, expr: &Box<Expr>) -> Result<Value, RuntimeE
             Ok(new_value)
         }
 
-        Expr::Call {
-            ref callee,
-            ref arguments,
-        } => {
+        Expr::Call { callee, arguments } => {
             let function = ctx.frames.get_function(&callee)?;
 
             let mut args = Vec::new();
             for arg in arguments {
-                args.push(interpret_expr(ctx, arg)?);
+                args.push(interpret_expr(ctx, *arg)?);
             }
 
             ctx.frames.push_frame();
@@ -381,8 +380,8 @@ fn call_user_function(
 
 fn binary_expr(
     ctx: &mut Context,
-    lhs: &Box<Expr>,
-    rhs: &Box<Expr>,
+    lhs: usize,
+    rhs: usize,
     op: &Token,
 ) -> Result<Value, RuntimeError> {
     match op {
@@ -402,7 +401,7 @@ fn binary_expr(
     }
 }
 
-fn add(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn add(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -412,7 +411,7 @@ fn add(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Run
     }
 }
 
-fn sub(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn sub(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -422,7 +421,7 @@ fn sub(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Run
     }
 }
 
-fn mul(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn mul(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -432,7 +431,7 @@ fn mul(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Run
     }
 }
 
-fn div(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn div(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -442,7 +441,7 @@ fn div(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Run
     }
 }
 
-fn and(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn and(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
 
     if let Value::Boolean(lhs) = lhs {
@@ -460,7 +459,7 @@ fn and(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Run
     todo!();
 }
 
-fn or(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn or(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
 
     if let Value::Boolean(lhs) = lhs {
@@ -478,7 +477,7 @@ fn or(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Runt
     todo!();
 }
 
-fn lt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn lt(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -488,7 +487,7 @@ fn lt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Runt
     }
 }
 
-fn le(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn le(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -498,7 +497,7 @@ fn le(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Runt
     }
 }
 
-fn gt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn gt(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -508,7 +507,7 @@ fn gt(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Runt
     }
 }
 
-fn ge(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn ge(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -518,21 +517,21 @@ fn ge(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, Runt
     }
 }
 
-fn eq(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn eq(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
     return Ok(Value::Boolean(lhs == rhs));
 }
 
-fn neq(ctx: &mut Context, lhs: &Box<Expr>, rhs: &Box<Expr>) -> Result<Value, RuntimeError> {
+fn neq(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
     return Ok(Value::Boolean(lhs != rhs));
 }
 
-fn unary_expr(ctx: &mut Context, right: &Box<Expr>, op: &Token) -> Result<Value, RuntimeError> {
+fn unary_expr(ctx: &mut Context, right: usize, op: &Token) -> Result<Value, RuntimeError> {
     let right_value = interpret_expr(ctx, right)?;
 
     match op {
@@ -707,7 +706,7 @@ mod program_tests {
             var a = 0;
             while a < 5 {
                 print(a);
-                a += 1;
+                a = a + 1;
             }"#,
             "0\n1\n2\n3\n4\n",
         );
@@ -721,7 +720,7 @@ mod program_tests {
                 }
 
                 print(a);
-                a += 1;
+                a = a + 1;
             }"#,
             "0\n1\n2\n3\n4\n",
         );
@@ -781,8 +780,10 @@ mod expression_tests {
 
         let mut ctx = Context::new();
 
+        ctx.expr_pool = &program.expressions;
+
         match *program.statements[0] {
-            Stmt::Expr(ref expr) => {
+            Stmt::Expr(expr) => {
                 let result = interpret_expr(&mut ctx, expr);
 
                 assert_eq!(result, expected);

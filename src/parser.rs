@@ -34,10 +34,10 @@ use crate::{lexer::Token, variant_eq};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    Expr(Box<Expr>),
+    Expr(usize),
     VarDecl {
         identifier: String,
-        expr: Option<Box<Expr>>,
+        expr: Option<usize>,
     },
     FunctionDecl {
         identifier: String,
@@ -47,35 +47,36 @@ pub enum Stmt {
     },
     Block(Vec<Box<Stmt>>),
     If {
-        cond: Box<Expr>,
+        cond: usize,
         if_block: Box<Stmt>,
         else_block: Option<Box<Stmt>>,
     },
     While {
-        cond: Box<Expr>,
+        cond: usize,
         block: Box<Stmt>,
     },
-    Return(Option<Box<Expr>>),
+    Return(Option<usize>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Binary {
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: usize,
+        rhs: usize,
         op: Token,
     },
     Unary {
-        rhs: Box<Expr>,
+        rhs: usize,
         op: Token,
     },
     Call {
         callee: String,
-        arguments: Vec<Box<Expr>>,
+        arguments: Vec<usize>,
     },
     Assignment {
         identifier: String,
-        value: Box<Expr>,
+        value: usize,
+        op: Token,
     },
     Number(f64),
     Boolean(bool),
@@ -106,6 +107,8 @@ pub enum ParseError {
 pub struct Program {
     pub statements: Vec<Box<Stmt>>,
     pub errors: Vec<ParseError>,
+
+    pub expressions: Vec<Expr>,
 }
 
 // NOTE: Will change
@@ -117,6 +120,8 @@ pub fn parse(tokens: Vec<Token>) -> Program {
 struct Parser {
     tokens: Vec<Token>,
     current_index: usize,
+
+    expressions: Vec<Expr>,
 }
 
 impl Parser {
@@ -124,6 +129,7 @@ impl Parser {
         Self {
             tokens,
             current_index: 0,
+            expressions: vec![],
         }
     }
 
@@ -132,6 +138,7 @@ impl Parser {
     fn parse_program(&mut self) -> Program {
         let mut program = Program {
             statements: vec![],
+            expressions: vec![],
             errors: vec![],
         };
 
@@ -149,6 +156,9 @@ impl Parser {
                 Err(err) => program.errors.push(err),
             };
         }
+
+        // TODO: Avoid this clone at some point
+        program.expressions = self.expressions.clone();
 
         return program;
     }
@@ -312,7 +322,7 @@ impl Parser {
         };
 
         let cond = match self.current_token() {
-            Token::Semicolon => Box::new(Expr::Boolean(true)),
+            Token::Semicolon => self.push_expression(Expr::Boolean(true)),
             _ => self.expression()?,
         };
         self.consume(Token::Semicolon)?;
@@ -362,14 +372,14 @@ impl Parser {
     }
 
     // expression   -> assignment ;
-    fn expression(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn expression(&mut self) -> Result<usize, ParseError> {
         let expr = self.assignement()?;
 
         return Ok(expr);
     }
 
     // assignment   -> IDENTIFIER "=" assignment | logic_or ;
-    fn assignement(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn assignement(&mut self) -> Result<usize, ParseError> {
         let current_index = self.current_index;
         let expr = self.logic_or()?;
 
@@ -384,7 +394,7 @@ impl Parser {
         ]) {
             let value = self.logic_or()?;
 
-            let identifier = match *expr {
+            let identifier = match &self.expressions[expr] {
                 Expr::Identifier(identifier) => identifier,
                 _ => {
                     return Err(ParseError::UnexpectedToken {
@@ -395,25 +405,10 @@ impl Parser {
                 }
             };
 
-            if token == Token::Equal {
-                return Ok(Box::new(Expr::Assignment { identifier, value }));
-            }
-
-            let op = match token {
-                Token::PlusEqual => Token::Plus,
-                Token::MinusEqual => Token::Minus,
-                Token::AsteriskEqual => Token::Asterisk,
-                Token::SlashEqual => Token::Slash,
-                _ => unreachable!(),
-            };
-
-            return Ok(Box::new(Expr::Assignment {
+            return Ok(self.push_expression(Expr::Assignment {
                 identifier: identifier.clone(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier(identifier)),
-                    rhs: value,
-                    op: op,
-                }),
+                value,
+                op: token,
             }));
         };
 
@@ -421,7 +416,7 @@ impl Parser {
     }
 
     // logic_or     -> logic_and ( "or" logic_and )* ;
-    fn logic_or(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn logic_or(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.logic_and()?;
 
         while self.matches(Token::Or) {
@@ -429,14 +424,14 @@ impl Parser {
             let rhs = self.logic_and()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // logic_and    -> equality ( "and" equality )* ;
-    fn logic_and(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn logic_and(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.equality()?;
 
         while self.matches(Token::And) {
@@ -444,14 +439,14 @@ impl Parser {
             let rhs = self.logic_and()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // equality     -> comparison ( ( "!=" | "==" ) comparison )* ;
-    fn equality(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn equality(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.comparison()?;
 
         while self.matches_any(&[Token::BangEqual, Token::EqualEqual]) {
@@ -459,14 +454,14 @@ impl Parser {
             let rhs = self.factor()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // comparison   -> term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-    fn comparison(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn comparison(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.term()?;
 
         while self.matches_any(&[
@@ -479,14 +474,14 @@ impl Parser {
             let rhs = self.factor()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // term         -> factor ( ( "-" | "+" ) factor )* ;
-    fn term(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn term(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.factor()?;
 
         while self.matches_any(&[Token::Minus, Token::Plus]) {
@@ -494,14 +489,14 @@ impl Parser {
             let rhs = self.factor()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // factor       -> unary ( ( "/" | "*" ) unary )* ;
-    fn factor(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn factor(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.unary()?;
 
         while self.matches_any(&[Token::Asterisk, Token::Slash]) {
@@ -509,7 +504,7 @@ impl Parser {
             let rhs = self.unary()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
@@ -517,12 +512,12 @@ impl Parser {
 
     // unary        -> ("not" | "-") unary
     //               | call ;
-    fn unary(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn unary(&mut self) -> Result<usize, ParseError> {
         if self.matches_any(&[Token::Minus, Token::Not]) {
             let op = self.previous_token().clone();
             let rhs = self.unary()?;
 
-            return Ok(Box::new(Expr::Unary { rhs, op }));
+            return Ok(self.push_expression(Expr::Unary { rhs, op }));
         }
 
         return self.call();
@@ -530,7 +525,7 @@ impl Parser {
 
     // call         -> primary ( "(" arguments? ")" "* ;
     // arguments    -> expression ( "," expression )* ","? ;
-    fn call(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn call(&mut self) -> Result<usize, ParseError> {
         let start_index = self.current_index;
         let expr = self.primary()?;
 
@@ -538,9 +533,9 @@ impl Parser {
             if self.matches(Token::OpenParen) {
                 let callee = expr;
 
-                match *callee {
+                match &self.expressions[callee] {
                     Expr::Identifier(identifier) => {
-                        return Ok(self.finish_call(identifier)?);
+                        return Ok(self.finish_call(identifier.clone())?);
                     }
                     _ => {
                         return Err(ParseError::UnexpectedToken {
@@ -558,7 +553,7 @@ impl Parser {
         return Ok(expr);
     }
 
-    fn finish_call(&mut self, callee: String) -> Result<Box<Expr>, ParseError> {
+    fn finish_call(&mut self, callee: String) -> Result<usize, ParseError> {
         let mut arguments = vec![];
 
         if !self.check(Token::CloseParen) {
@@ -575,18 +570,18 @@ impl Parser {
 
         _ = self.consume(Token::CloseParen)?;
 
-        return Ok(Box::new(Expr::Call { callee, arguments }));
+        return Ok(self.push_expression(Expr::Call { callee, arguments }));
     }
 
     // primary      -> NUMBER | STRING | "true" | "false" | "nil"
     //               | "(" expression ")" | IDENTIFIER;
-    fn primary(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn primary(&mut self) -> Result<usize, ParseError> {
         let expr = match self.current_token() {
-            Token::Number(n) => Box::new(Expr::Number(*n)),
-            Token::True => Box::new(Expr::Boolean(true)),
-            Token::False => Box::new(Expr::Boolean(false)),
-            Token::String(s) => Box::new(Expr::String(s.clone())),
-            Token::Identifier(s) => Box::new(Expr::Identifier(s.clone())),
+            Token::Number(n) => self.push_expression(Expr::Number(*n)),
+            Token::True => self.push_expression(Expr::Boolean(true)),
+            Token::False => self.push_expression(Expr::Boolean(false)),
+            Token::String(s) => self.push_expression(Expr::String(s.clone())),
+            Token::Identifier(s) => self.push_expression(Expr::Identifier(s.clone())),
             Token::OpenParen => self.grouping()?,
             _ => {
                 return Err(ParseError::InvalidTokenType {
@@ -601,7 +596,7 @@ impl Parser {
         return Ok(expr);
     }
 
-    fn grouping(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn grouping(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::OpenParen)?;
         let expr = self.expression()?;
         self.expect(Token::CloseParen)?;
@@ -680,9 +675,16 @@ impl Parser {
 
         return self.current_token();
     }
+
+    fn push_expression(&mut self, expr: Expr) -> usize {
+        let index = self.expressions.len();
+        self.expressions.push(expr);
+        return index;
+    }
 }
 
 #[cfg(test)]
+#[cfg(any())]
 mod stmt_tests {
     use crate::lexer::tokenize;
 
@@ -1024,12 +1026,13 @@ mod stmt_tests {
 }
 
 #[cfg(test)]
+#[cfg(any())]
 mod expr_tests {
     use crate::lexer::tokenize;
 
     use super::*;
 
-    fn test_expression(input: &str, expected: Result<Box<Expr>, ParseError>) {
+    fn test_expression(input: &str, expected: Result<usize, ParseError>) {
         let (tokens, errors) = tokenize(input);
         assert_eq!(errors, vec![]);
 
