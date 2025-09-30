@@ -34,10 +34,10 @@ use crate::{lexer::Token, variant_eq};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    Expr(Box<Expr>),
+    Expr(usize),
     VarDecl {
         identifier: String,
-        expr: Option<Box<Expr>>,
+        expr: Option<usize>,
     },
     FunctionDecl {
         identifier: String,
@@ -47,35 +47,36 @@ pub enum Stmt {
     },
     Block(Vec<Box<Stmt>>),
     If {
-        cond: Box<Expr>,
+        cond: usize,
         if_block: Box<Stmt>,
         else_block: Option<Box<Stmt>>,
     },
     While {
-        cond: Box<Expr>,
+        cond: usize,
         block: Box<Stmt>,
     },
-    Return(Option<Box<Expr>>),
+    Return(Option<usize>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Binary {
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: usize,
+        rhs: usize,
         op: Token,
     },
     Unary {
-        rhs: Box<Expr>,
+        rhs: usize,
         op: Token,
     },
     Call {
         callee: String,
-        arguments: Vec<Box<Expr>>,
+        arguments: Vec<usize>,
     },
     Assignment {
         identifier: String,
-        value: Box<Expr>,
+        value: usize,
+        op: Token,
     },
     Number(f64),
     Boolean(bool),
@@ -106,6 +107,8 @@ pub enum ParseError {
 pub struct Program {
     pub statements: Vec<Box<Stmt>>,
     pub errors: Vec<ParseError>,
+
+    pub expressions: Vec<Expr>,
 }
 
 // NOTE: Will change
@@ -117,6 +120,8 @@ pub fn parse(tokens: Vec<Token>) -> Program {
 struct Parser {
     tokens: Vec<Token>,
     current_index: usize,
+
+    expressions: Vec<Expr>,
 }
 
 impl Parser {
@@ -124,6 +129,7 @@ impl Parser {
         Self {
             tokens,
             current_index: 0,
+            expressions: vec![],
         }
     }
 
@@ -132,6 +138,7 @@ impl Parser {
     fn parse_program(&mut self) -> Program {
         let mut program = Program {
             statements: vec![],
+            expressions: vec![],
             errors: vec![],
         };
 
@@ -149,6 +156,9 @@ impl Parser {
                 Err(err) => program.errors.push(err),
             };
         }
+
+        // TODO: Avoid this clone at some point
+        program.expressions = self.expressions.clone();
 
         return program;
     }
@@ -312,7 +322,7 @@ impl Parser {
         };
 
         let cond = match self.current_token() {
-            Token::Semicolon => Box::new(Expr::Boolean(true)),
+            Token::Semicolon => self.push_expression(Expr::Boolean(true)),
             _ => self.expression()?,
         };
         self.consume(Token::Semicolon)?;
@@ -362,14 +372,14 @@ impl Parser {
     }
 
     // expression   -> assignment ;
-    fn expression(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn expression(&mut self) -> Result<usize, ParseError> {
         let expr = self.assignement()?;
 
         return Ok(expr);
     }
 
     // assignment   -> IDENTIFIER "=" assignment | logic_or ;
-    fn assignement(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn assignement(&mut self) -> Result<usize, ParseError> {
         let current_index = self.current_index;
         let expr = self.logic_or()?;
 
@@ -384,7 +394,7 @@ impl Parser {
         ]) {
             let value = self.logic_or()?;
 
-            let identifier = match *expr {
+            let identifier = match &self.expressions[expr] {
                 Expr::Identifier(identifier) => identifier,
                 _ => {
                     return Err(ParseError::UnexpectedToken {
@@ -395,25 +405,10 @@ impl Parser {
                 }
             };
 
-            if token == Token::Equal {
-                return Ok(Box::new(Expr::Assignment { identifier, value }));
-            }
-
-            let op = match token {
-                Token::PlusEqual => Token::Plus,
-                Token::MinusEqual => Token::Minus,
-                Token::AsteriskEqual => Token::Asterisk,
-                Token::SlashEqual => Token::Slash,
-                _ => unreachable!(),
-            };
-
-            return Ok(Box::new(Expr::Assignment {
+            return Ok(self.push_expression(Expr::Assignment {
                 identifier: identifier.clone(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier(identifier)),
-                    rhs: value,
-                    op: op,
-                }),
+                value,
+                op: token,
             }));
         };
 
@@ -421,7 +416,7 @@ impl Parser {
     }
 
     // logic_or     -> logic_and ( "or" logic_and )* ;
-    fn logic_or(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn logic_or(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.logic_and()?;
 
         while self.matches(Token::Or) {
@@ -429,14 +424,14 @@ impl Parser {
             let rhs = self.logic_and()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // logic_and    -> equality ( "and" equality )* ;
-    fn logic_and(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn logic_and(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.equality()?;
 
         while self.matches(Token::And) {
@@ -444,14 +439,14 @@ impl Parser {
             let rhs = self.logic_and()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // equality     -> comparison ( ( "!=" | "==" ) comparison )* ;
-    fn equality(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn equality(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.comparison()?;
 
         while self.matches_any(&[Token::BangEqual, Token::EqualEqual]) {
@@ -459,14 +454,14 @@ impl Parser {
             let rhs = self.factor()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // comparison   -> term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-    fn comparison(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn comparison(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.term()?;
 
         while self.matches_any(&[
@@ -479,14 +474,14 @@ impl Parser {
             let rhs = self.factor()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // term         -> factor ( ( "-" | "+" ) factor )* ;
-    fn term(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn term(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.factor()?;
 
         while self.matches_any(&[Token::Minus, Token::Plus]) {
@@ -494,14 +489,14 @@ impl Parser {
             let rhs = self.factor()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
     }
 
     // factor       -> unary ( ( "/" | "*" ) unary )* ;
-    fn factor(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn factor(&mut self) -> Result<usize, ParseError> {
         let mut expr = self.unary()?;
 
         while self.matches_any(&[Token::Asterisk, Token::Slash]) {
@@ -509,7 +504,7 @@ impl Parser {
             let rhs = self.unary()?;
             let lhs = expr;
 
-            expr = Box::new(Expr::Binary { lhs, rhs, op });
+            expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
         return Ok(expr);
@@ -517,12 +512,12 @@ impl Parser {
 
     // unary        -> ("not" | "-") unary
     //               | call ;
-    fn unary(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn unary(&mut self) -> Result<usize, ParseError> {
         if self.matches_any(&[Token::Minus, Token::Not]) {
             let op = self.previous_token().clone();
             let rhs = self.unary()?;
 
-            return Ok(Box::new(Expr::Unary { rhs, op }));
+            return Ok(self.push_expression(Expr::Unary { rhs, op }));
         }
 
         return self.call();
@@ -530,7 +525,7 @@ impl Parser {
 
     // call         -> primary ( "(" arguments? ")" "* ;
     // arguments    -> expression ( "," expression )* ","? ;
-    fn call(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn call(&mut self) -> Result<usize, ParseError> {
         let start_index = self.current_index;
         let expr = self.primary()?;
 
@@ -538,9 +533,9 @@ impl Parser {
             if self.matches(Token::OpenParen) {
                 let callee = expr;
 
-                match *callee {
+                match &self.expressions[callee] {
                     Expr::Identifier(identifier) => {
-                        return Ok(self.finish_call(identifier)?);
+                        return Ok(self.finish_call(identifier.clone())?);
                     }
                     _ => {
                         return Err(ParseError::UnexpectedToken {
@@ -558,7 +553,7 @@ impl Parser {
         return Ok(expr);
     }
 
-    fn finish_call(&mut self, callee: String) -> Result<Box<Expr>, ParseError> {
+    fn finish_call(&mut self, callee: String) -> Result<usize, ParseError> {
         let mut arguments = vec![];
 
         if !self.check(Token::CloseParen) {
@@ -575,18 +570,18 @@ impl Parser {
 
         _ = self.consume(Token::CloseParen)?;
 
-        return Ok(Box::new(Expr::Call { callee, arguments }));
+        return Ok(self.push_expression(Expr::Call { callee, arguments }));
     }
 
     // primary      -> NUMBER | STRING | "true" | "false" | "nil"
     //               | "(" expression ")" | IDENTIFIER;
-    fn primary(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn primary(&mut self) -> Result<usize, ParseError> {
         let expr = match self.current_token() {
-            Token::Number(n) => Box::new(Expr::Number(*n)),
-            Token::True => Box::new(Expr::Boolean(true)),
-            Token::False => Box::new(Expr::Boolean(false)),
-            Token::String(s) => Box::new(Expr::String(s.clone())),
-            Token::Identifier(s) => Box::new(Expr::Identifier(s.clone())),
+            Token::Number(n) => self.push_expression(Expr::Number(*n)),
+            Token::True => self.push_expression(Expr::Boolean(true)),
+            Token::False => self.push_expression(Expr::Boolean(false)),
+            Token::String(s) => self.push_expression(Expr::String(s.clone())),
+            Token::Identifier(s) => self.push_expression(Expr::Identifier(s.clone())),
             Token::OpenParen => self.grouping()?,
             _ => {
                 return Err(ParseError::InvalidTokenType {
@@ -601,7 +596,7 @@ impl Parser {
         return Ok(expr);
     }
 
-    fn grouping(&mut self) -> Result<Box<Expr>, ParseError> {
+    fn grouping(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::OpenParen)?;
         let expr = self.expression()?;
         self.expect(Token::CloseParen)?;
@@ -680,6 +675,12 @@ impl Parser {
 
         return self.current_token();
     }
+
+    fn push_expression(&mut self, expr: Expr) -> usize {
+        let index = self.expressions.len();
+        self.expressions.push(expr);
+        return index;
+    }
 }
 
 #[cfg(test)]
@@ -688,43 +689,58 @@ mod stmt_tests {
 
     use super::*;
 
-    fn test_statement(input: &str, expected: Result<Option<Box<Stmt>>, ParseError>) {
+    fn test_statement(
+        input: &str,
+        expected_stmt: Result<Option<Box<Stmt>>, ParseError>,
+        expected_expr: Vec<Expr>,
+    ) {
         let (tokens, errors) = tokenize(input);
         assert_eq!(errors, vec![]);
 
         let mut parser = Parser::new(tokens);
         let stmt = parser.declaration();
 
-        assert_eq!(stmt, expected);
+        assert_eq!(stmt, expected_stmt);
+        assert_eq!(parser.expressions, expected_expr);
     }
 
     #[test]
     fn empty_declaration() {
-        test_statement("", Ok(None));
+        test_statement("", Ok(None), vec![]);
     }
 
     #[test]
     fn expr_stmt() {
         test_statement(
             "42;",
-            Ok(Some(Box::new(Stmt::Expr(Box::new(Expr::Number(42.0)))))),
+            Ok(Some(Box::new(Stmt::Expr(0)))),
+            vec![Expr::Number(42.0)],
         );
 
         test_statement(
             "true or false and 42 < 43;",
-            Ok(Some(Box::new(Stmt::Expr(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Boolean(true)),
-                rhs: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Boolean(false)),
-                    rhs: Box::new(Expr::Binary {
-                        lhs: Box::new(Expr::Number(42.0)),
-                        rhs: Box::new(Expr::Number(43.0)),
-                        op: Token::Less,
-                    }),
+            Ok(Some(Box::new(Stmt::Expr(6)))),
+            vec![
+                Expr::Boolean(true),
+                Expr::Boolean(false),
+                Expr::Number(42.0),
+                Expr::Number(43.0),
+                Expr::Binary {
+                    lhs: 2,
+                    rhs: 3,
+                    op: Token::Less,
+                },
+                Expr::Binary {
+                    lhs: 1,
+                    rhs: 4,
                     op: Token::And,
-                }),
-                op: Token::Or,
-            }))))),
+                },
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 5,
+                    op: Token::Or,
+                },
+            ],
         );
     }
 
@@ -736,14 +752,16 @@ mod stmt_tests {
                 identifier: "foo".to_string(),
                 expr: None,
             }))),
+            vec![],
         );
 
         test_statement(
             "var toto = \"tata\";",
             Ok(Some(Box::new(Stmt::VarDecl {
                 identifier: "toto".to_string(),
-                expr: Some(Box::new(Expr::String("tata".to_string()))),
+                expr: Some(0),
             }))),
+            vec![Expr::String("tata".to_string())],
         );
 
         test_statement(
@@ -753,6 +771,7 @@ mod stmt_tests {
                 found: Token::EOF,
                 position: 2,
             }),
+            vec![],
         );
 
         test_statement(
@@ -762,24 +781,18 @@ mod stmt_tests {
                 found: Token::EOF,
                 position: 4,
             }),
+            vec![Expr::Number(42.0)],
         );
     }
 
     #[test]
     fn block_statement() {
-        test_statement(
-            r#"{
-            }"#,
-            Ok(Some(Box::new(Stmt::Block(vec![])))),
-        );
+        test_statement("{}", Ok(Some(Box::new(Stmt::Block(vec![])))), vec![]);
 
         test_statement(
-            r#"{
-                42;
-            }"#,
-            Ok(Some(Box::new(Stmt::Block(vec![Box::new(Stmt::Expr(
-                Box::new(Expr::Number(42.0)),
-            ))])))),
+            "{42;}",
+            Ok(Some(Box::new(Stmt::Block(vec![Box::new(Stmt::Expr(0))])))),
+            vec![Expr::Number(42.0)],
         );
 
         test_statement(
@@ -791,21 +804,28 @@ mod stmt_tests {
             Ok(Some(Box::new(Stmt::Block(vec![
                 Box::new(Stmt::VarDecl {
                     identifier: "foo".to_string(),
-                    expr: Some(Box::new(Expr::Number(42.0))),
+                    expr: Some(0),
                 }),
                 Box::new(Stmt::VarDecl {
                     identifier: "bar".to_string(),
-                    expr: Some(Box::new(Expr::Number(1337.0))),
+                    expr: Some(1),
                 }),
                 Box::new(Stmt::VarDecl {
                     identifier: "baz".to_string(),
-                    expr: Some(Box::new(Expr::Binary {
-                        lhs: Box::new(Expr::Identifier("foo".to_string())),
-                        rhs: Box::new(Expr::Identifier("bar".to_string())),
-                        op: Token::Plus,
-                    })),
+                    expr: Some(4),
                 }),
             ])))),
+            vec![
+                Expr::Number(42.0),
+                Expr::Number(1337.0),
+                Expr::Identifier("foo".to_string()),
+                Expr::Identifier("bar".to_string()),
+                Expr::Binary {
+                    lhs: 2,
+                    rhs: 3,
+                    op: Token::Plus,
+                },
+            ],
         );
 
         test_statement(
@@ -814,6 +834,7 @@ mod stmt_tests {
                 expected: Token::CloseBrace,
                 position: 0,
             }),
+            vec![Expr::Number(42.0)],
         );
     }
 
@@ -826,6 +847,7 @@ mod stmt_tests {
                 args: vec![],
                 body: Box::new(Stmt::Block(vec![])),
             }))),
+            vec![],
         );
 
         test_statement(
@@ -835,6 +857,7 @@ mod stmt_tests {
                 args: vec!["a".to_string()],
                 body: Box::new(Stmt::Block(vec![])),
             }))),
+            vec![],
         );
 
         test_statement(
@@ -844,6 +867,7 @@ mod stmt_tests {
                 args: vec!["bar".to_string(), "baz".to_string()],
                 body: Box::new(Stmt::Block(vec![])),
             }))),
+            vec![],
         );
 
         test_statement(
@@ -853,6 +877,7 @@ mod stmt_tests {
                 found: Token::OpenBrace,
                 position: 6,
             }),
+            vec![],
         );
     }
 
@@ -861,49 +886,57 @@ mod stmt_tests {
         test_statement(
             "if true {}",
             Ok(Some(Box::new(Stmt::If {
-                cond: Box::new(Expr::Boolean(true)),
+                cond: 0,
                 if_block: Box::new(Stmt::Block(vec![])),
                 else_block: None,
             }))),
+            vec![Expr::Boolean(true)],
         );
 
         test_statement(
             "if false {} else {}",
             Ok(Some(Box::new(Stmt::If {
-                cond: Box::new(Expr::Boolean(false)),
+                cond: 0,
                 if_block: Box::new(Stmt::Block(vec![])),
                 else_block: Some(Box::new(Stmt::Block(vec![]))),
             }))),
+            vec![Expr::Boolean(false)],
         );
 
         test_statement(
             "if false {} else if true {}",
             Ok(Some(Box::new(Stmt::If {
-                cond: Box::new(Expr::Boolean(false)),
+                cond: 0,
                 if_block: Box::new(Stmt::Block(vec![])),
                 else_block: Some(Box::new(Stmt::If {
-                    cond: Box::new(Expr::Boolean(true)),
+                    cond: 1,
                     if_block: Box::new(Stmt::Block(vec![])),
                     else_block: None,
                 })),
             }))),
+            vec![Expr::Boolean(false), Expr::Boolean(true)],
         );
 
         test_statement(
             "if false {} else if true {} else if false {} else {}",
             Ok(Some(Box::new(Stmt::If {
-                cond: Box::new(Expr::Boolean(false)),
+                cond: 0,
                 if_block: Box::new(Stmt::Block(vec![])),
                 else_block: Some(Box::new(Stmt::If {
-                    cond: Box::new(Expr::Boolean(true)),
+                    cond: 1,
                     if_block: Box::new(Stmt::Block(vec![])),
                     else_block: Some(Box::new(Stmt::If {
-                        cond: Box::new(Expr::Boolean(false)),
+                        cond: 2,
                         if_block: Box::new(Stmt::Block(vec![])),
                         else_block: Some(Box::new(Stmt::Block(vec![]))),
                     })),
                 })),
             }))),
+            vec![
+                Expr::Boolean(false),
+                Expr::Boolean(true),
+                Expr::Boolean(false),
+            ],
         );
 
         test_statement(
@@ -913,9 +946,14 @@ mod stmt_tests {
                 found: Token::Else,
                 position: 2,
             }),
+            vec![Expr::Boolean(false)],
         );
 
-        test_statement("if false {} else foo;", Err(ParseError::Todo));
+        test_statement(
+            "if false {} else foo;",
+            Err(ParseError::Todo),
+            vec![Expr::Boolean(false)],
+        );
     }
 
     #[test]
@@ -923,9 +961,10 @@ mod stmt_tests {
         test_statement(
             "while true {}",
             Ok(Some(Box::new(Stmt::While {
-                cond: Box::new(Expr::Boolean(true)),
+                cond: 0,
                 block: Box::new(Stmt::Block(vec![])),
             }))),
+            vec![Expr::Boolean(true)],
         );
 
         test_statement(
@@ -935,6 +974,7 @@ mod stmt_tests {
                 found: Token::Semicolon,
                 position: 2,
             }),
+            vec![Expr::Boolean(false)],
         );
     }
 
@@ -943,23 +983,31 @@ mod stmt_tests {
         test_statement(
             "for ;; {}",
             Ok(Some(Box::new(Stmt::Block(vec![Box::new(Stmt::While {
-                cond: Box::new(Expr::Boolean(true)),
+                cond: 0,
                 block: Box::new(Stmt::Block(vec![])),
             })])))),
+            vec![Expr::Boolean(true)],
         );
 
         test_statement(
             "for i = 0;; {}",
             Ok(Some(Box::new(Stmt::Block(vec![
-                Box::new(Stmt::Expr(Box::new(Expr::Assignment {
-                    identifier: "i".to_string(),
-                    value: Box::new(Expr::Number(0.0)),
-                }))),
+                Box::new(Stmt::Expr(2)),
                 Box::new(Stmt::While {
-                    cond: Box::new(Expr::Boolean(true)),
+                    cond: 3,
                     block: Box::new(Stmt::Block(vec![])),
                 }),
             ])))),
+            vec![
+                Expr::Identifier("i".to_string()),
+                Expr::Number(0.0),
+                Expr::Assignment {
+                    identifier: "i".to_string(),
+                    value: 1,
+                    op: Token::Equal,
+                },
+                Expr::Boolean(true),
+            ],
         );
 
         test_statement(
@@ -967,13 +1015,14 @@ mod stmt_tests {
             Ok(Some(Box::new(Stmt::Block(vec![
                 Box::new(Stmt::VarDecl {
                     identifier: "i".to_string(),
-                    expr: Some(Box::new(Expr::Number(0.0))),
+                    expr: Some(0),
                 }),
                 Box::new(Stmt::While {
-                    cond: Box::new(Expr::Boolean(true)),
+                    cond: 1,
                     block: Box::new(Stmt::Block(vec![])),
                 }),
             ])))),
+            vec![Expr::Number(0.0), Expr::Boolean(true)],
         );
 
         test_statement(
@@ -981,30 +1030,45 @@ mod stmt_tests {
             Ok(Some(Box::new(Stmt::Block(vec![
                 Box::new(Stmt::VarDecl {
                     identifier: "i".to_string(),
-                    expr: Some(Box::new(Expr::Number(0.0))),
+                    expr: Some(0),
                 }),
                 Box::new(Stmt::While {
-                    cond: Box::new(Expr::Binary {
-                        lhs: Box::new(Expr::Identifier("i".to_string())),
-                        rhs: Box::new(Expr::Number(10.0)),
-                        op: Token::Less,
-                    }),
+                    cond: 3,
                     block: Box::new(Stmt::Block(vec![
-                        Box::new(Stmt::Expr(Box::new(Expr::Call {
-                            callee: "print".to_string(),
-                            arguments: vec![Box::new(Expr::Identifier("i".to_string()))],
-                        }))),
-                        Box::new(Stmt::Expr(Box::new(Expr::Assignment {
-                            identifier: "i".to_string(),
-                            value: Box::new(Expr::Binary {
-                                lhs: Box::new(Expr::Identifier("i".to_string())),
-                                rhs: Box::new(Expr::Number(1.0)),
-                                op: Token::Plus,
-                            }),
-                        }))),
+                        Box::new(Stmt::Expr(11)),
+                        Box::new(Stmt::Expr(8)),
                     ])),
                 }),
             ])))),
+            vec![
+                Expr::Number(0.0),
+                Expr::Identifier("i".to_string()),
+                Expr::Number(10.0),
+                Expr::Binary {
+                    lhs: 1,
+                    rhs: 2,
+                    op: Token::Less,
+                },
+                Expr::Identifier("i".to_string()),
+                Expr::Identifier("i".to_string()),
+                Expr::Number(1.0),
+                Expr::Binary {
+                    lhs: 5,
+                    rhs: 6,
+                    op: Token::Plus,
+                },
+                Expr::Assignment {
+                    identifier: "i".to_string(),
+                    value: 7,
+                    op: Token::Equal,
+                },
+                Expr::Identifier("print".to_string()),
+                Expr::Identifier("i".to_string()),
+                Expr::Call {
+                    callee: "print".to_string(),
+                    arguments: vec![10],
+                },
+            ],
         );
     }
 
@@ -1012,12 +1076,11 @@ mod stmt_tests {
     fn return_stmt() {
         test_statement(
             "return 42;",
-            Ok(Some(Box::new(Stmt::Return(Some(Box::new(Expr::Number(
-                42.0,
-            ))))))),
+            Ok(Some(Box::new(Stmt::Return(Some(0))))),
+            vec![Expr::Number(42.0)],
         );
 
-        test_statement("return;", Ok(Some(Box::new(Stmt::Return(None)))));
+        test_statement("return;", Ok(Some(Box::new(Stmt::Return(None)))), vec![]);
     }
 
     // TODO: Test program
@@ -1029,23 +1092,26 @@ mod expr_tests {
 
     use super::*;
 
-    fn test_expression(input: &str, expected: Result<Box<Expr>, ParseError>) {
+    fn test_expression(input: &str, expected: Result<Vec<Expr>, ParseError>) {
         let (tokens, errors) = tokenize(input);
         assert_eq!(errors, vec![]);
 
         let mut parser = Parser::new(tokens);
         let expr = parser.expression();
 
-        assert_eq!(expr, expected);
+        match expr {
+            Ok(_) => assert_eq!(parser.expressions, expected.unwrap()),
+            Err(err) => assert_eq!(err, expected.unwrap_err()),
+        }
     }
 
     #[test]
     fn primary_expressions() {
-        test_expression("42", Ok(Box::new(Expr::Number(42.0))));
-        test_expression("true", Ok(Box::new(Expr::Boolean(true))));
+        test_expression("42", Ok(vec![Expr::Number(42.0)]));
+        test_expression("true", Ok(vec![Expr::Boolean(true)]));
         test_expression(
             "\"hello, world\"",
-            Ok(Box::new(Expr::String("hello, world".into()))),
+            Ok(vec![Expr::String("hello, world".into())]),
         );
 
         test_expression(
@@ -1059,18 +1125,24 @@ mod expr_tests {
 
     #[test]
     fn grouped_expressions() {
-        test_expression("(42)", Ok(Box::new(Expr::Number(42.0))));
+        test_expression("(42)", Ok(vec![Expr::Number(42.0)]));
         test_expression(
             "1 * (2 + 3)",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(1.0)),
-                rhs: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Number(2.0)),
-                    rhs: Box::new(Expr::Number(3.0)),
+            Ok(vec![
+                Expr::Number(1.0),
+                Expr::Number(2.0),
+                Expr::Number(3.0),
+                Expr::Binary {
+                    lhs: 1,
+                    rhs: 2,
                     op: Token::Plus,
-                }),
-                op: Token::Asterisk,
-            })),
+                },
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 3,
+                    op: Token::Asterisk,
+                },
+            ]),
         );
     }
 
@@ -1078,18 +1150,24 @@ mod expr_tests {
     fn unary_expressions() {
         test_expression(
             "-42",
-            Ok(Box::new(Expr::Unary {
-                rhs: Box::new(Expr::Number(42.0)),
-                op: Token::Minus,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Unary {
+                    rhs: 0,
+                    op: Token::Minus,
+                },
+            ]),
         );
 
         test_expression(
             "not false",
-            Ok(Box::new(Expr::Unary {
-                rhs: Box::new(Expr::Boolean(false)),
-                op: Token::Not,
-            })),
+            Ok(vec![
+                Expr::Boolean(false),
+                Expr::Unary {
+                    rhs: 0,
+                    op: Token::Not,
+                },
+            ]),
         );
     }
 
@@ -1097,20 +1175,28 @@ mod expr_tests {
     fn term_expressions() {
         test_expression(
             "1 + 2",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(1.0)),
-                rhs: Box::new(Expr::Number(2.0)),
-                op: Token::Plus,
-            })),
+            Ok(vec![
+                Expr::Number(1.0),
+                Expr::Number(2.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Plus,
+                },
+            ]),
         );
 
         test_expression(
             "4.2 - 13.37",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(4.2)),
-                rhs: Box::new(Expr::Number(13.37)),
-                op: Token::Minus,
-            })),
+            Ok(vec![
+                Expr::Number(4.2),
+                Expr::Number(13.37),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Minus,
+                },
+            ]),
         );
     }
 
@@ -1118,20 +1204,28 @@ mod expr_tests {
     fn factor_expressions() {
         test_expression(
             "2 * 3",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(2.0)),
-                rhs: Box::new(Expr::Number(3.0)),
-                op: Token::Asterisk,
-            })),
+            Ok(vec![
+                Expr::Number(2.0),
+                Expr::Number(3.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Asterisk,
+                },
+            ]),
         );
 
         test_expression(
             "7 / 4",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(7.0)),
-                rhs: Box::new(Expr::Number(4.0)),
-                op: Token::Slash,
-            })),
+            Ok(vec![
+                Expr::Number(7.0),
+                Expr::Number(4.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Slash,
+                },
+            ]),
         );
     }
 
@@ -1139,11 +1233,15 @@ mod expr_tests {
     fn logic_or_expressions() {
         test_expression(
             "true or false",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Boolean(true)),
-                rhs: Box::new(Expr::Boolean(false)),
-                op: Token::Or,
-            })),
+            Ok(vec![
+                Expr::Boolean(true),
+                Expr::Boolean(false),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Or,
+                },
+            ]),
         );
     }
 
@@ -1151,11 +1249,15 @@ mod expr_tests {
     fn logic_and_expressions() {
         test_expression(
             "false and true",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Boolean(false)),
-                rhs: Box::new(Expr::Boolean(true)),
-                op: Token::And,
-            })),
+            Ok(vec![
+                Expr::Boolean(false),
+                Expr::Boolean(true),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::And,
+                },
+            ]),
         );
     }
 
@@ -1163,20 +1265,28 @@ mod expr_tests {
     fn equality_expressions() {
         test_expression(
             "33.0 == false",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(33.0)),
-                rhs: Box::new(Expr::Boolean(false)),
-                op: Token::EqualEqual,
-            })),
+            Ok(vec![
+                Expr::Number(33.0),
+                Expr::Boolean(false),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::EqualEqual,
+                },
+            ]),
         );
 
         test_expression(
             "\"hello\" != \"test\"",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::String("hello".into())),
-                rhs: Box::new(Expr::String("test".into())),
-                op: Token::BangEqual,
-            })),
+            Ok(vec![
+                Expr::String("hello".into()),
+                Expr::String("test".into()),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::BangEqual,
+                },
+            ]),
         );
     }
 
@@ -1184,38 +1294,54 @@ mod expr_tests {
     fn comparison_expressions() {
         test_expression(
             "42 > 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::Greater,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Greater,
+                },
+            ]),
         );
 
         test_expression(
             "42 >= 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::GreaterEqual,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::GreaterEqual,
+                },
+            ]),
         );
 
         test_expression(
             "42 < 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::Less,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::Less,
+                },
+            ]),
         );
 
         test_expression(
             "42 <= 33",
-            Ok(Box::new(Expr::Binary {
-                lhs: Box::new(Expr::Number(42.0)),
-                rhs: Box::new(Expr::Number(33.0)),
-                op: Token::LessEqual,
-            })),
+            Ok(vec![
+                Expr::Number(42.0),
+                Expr::Number(33.0),
+                Expr::Binary {
+                    lhs: 0,
+                    rhs: 1,
+                    op: Token::LessEqual,
+                },
+            ]),
         );
     }
 
@@ -1223,25 +1349,32 @@ mod expr_tests {
     fn call_expressions() {
         test_expression(
             "foo()",
-            Ok(Box::new(Expr::Call {
-                callee: "foo".to_string(),
-                arguments: vec![],
-            })),
+            Ok(vec![
+                Expr::Identifier("foo".to_string()),
+                Expr::Call {
+                    callee: "foo".to_string(),
+                    arguments: vec![],
+                },
+            ]),
         );
 
         test_expression(
             "bar(\"test\", 39 + 3)",
-            Ok(Box::new(Expr::Call {
-                callee: "bar".to_string(),
-                arguments: vec![
-                    Box::new(Expr::String("test".to_string())),
-                    Box::new(Expr::Binary {
-                        lhs: Box::new(Expr::Number(39.0)),
-                        rhs: Box::new(Expr::Number(3.0)),
-                        op: Token::Plus,
-                    }),
-                ],
-            })),
+            Ok(vec![
+                Expr::Identifier("bar".to_string()),
+                Expr::String("test".to_string()),
+                Expr::Number(39.0),
+                Expr::Number(3.0),
+                Expr::Binary {
+                    lhs: 2,
+                    rhs: 3,
+                    op: Token::Plus,
+                },
+                Expr::Call {
+                    callee: "bar".to_string(),
+                    arguments: vec![1, 4],
+                },
+            ]),
         );
 
         test_expression(
@@ -1267,22 +1400,34 @@ mod expr_tests {
     fn assignment_expressions() {
         test_expression(
             "a = 42",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Number(42.0)),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(42.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::Equal,
+                },
+            ]),
         );
 
         test_expression(
             "foo=15+27",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "foo".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Number(15.0)),
-                    rhs: Box::new(Expr::Number(27.0)),
+            Ok(vec![
+                Expr::Identifier("foo".to_string()),
+                Expr::Number(15.0),
+                Expr::Number(27.0),
+                Expr::Binary {
+                    lhs: 1,
+                    rhs: 2,
                     op: Token::Plus,
-                }),
-            })),
+                },
+                Expr::Assignment {
+                    identifier: "foo".to_string(),
+                    value: 3,
+                    op: Token::Equal,
+                },
+            ]),
         );
 
         test_expression(
@@ -1293,56 +1438,57 @@ mod expr_tests {
                 position: 0,
             }),
         );
-    }
 
-    #[test]
-    fn desugared_assignment_expressions() {
         test_expression(
             "a += 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Plus,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::PlusEqual,
+                },
+            ]),
         );
 
         test_expression(
             "a -= 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Minus,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::MinusEqual,
+                },
+            ]),
         );
 
         test_expression(
             "a *= 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Asterisk,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::AsteriskEqual,
+                },
+            ]),
         );
 
         test_expression(
             "a /= 2",
-            Ok(Box::new(Expr::Assignment {
-                identifier: "a".to_string(),
-                value: Box::new(Expr::Binary {
-                    lhs: Box::new(Expr::Identifier("a".to_string())),
-                    rhs: Box::new(Expr::Number(2.0)),
-                    op: Token::Slash,
-                }),
-            })),
+            Ok(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Number(2.0),
+                Expr::Assignment {
+                    identifier: "a".to_string(),
+                    value: 1,
+                    op: Token::SlashEqual,
+                },
+            ]),
         );
     }
 }
