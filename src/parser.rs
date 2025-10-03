@@ -43,17 +43,17 @@ pub enum Stmt {
         identifier: String,
         // FIXME: This will need to be type declarations at some point instead
         args: Vec<String>,
-        body: Box<Stmt>,
+        body: usize,
     },
-    Block(Vec<Box<Stmt>>),
+    Block(Vec<usize>),
     If {
         cond: usize,
-        if_block: Box<Stmt>,
-        else_block: Option<Box<Stmt>>,
+        if_block: usize,
+        else_block: Option<usize>,
     },
     While {
         cond: usize,
-        block: Box<Stmt>,
+        block: usize,
     },
     Return(Option<usize>),
 }
@@ -105,9 +105,10 @@ pub enum ParseError {
 }
 
 pub struct Program {
-    pub statements: Vec<Box<Stmt>>,
+    pub program_statements: Vec<usize>,
     pub errors: Vec<ParseError>,
 
+    pub statements: Vec<Stmt>,
     pub expressions: Vec<Expr>,
 }
 
@@ -122,6 +123,7 @@ struct Parser {
     current_index: usize,
 
     expressions: Vec<Expr>,
+    statements: Vec<Stmt>,
 }
 
 impl Parser {
@@ -130,6 +132,7 @@ impl Parser {
             tokens,
             current_index: 0,
             expressions: vec![],
+            statements: vec![],
         }
     }
 
@@ -137,9 +140,10 @@ impl Parser {
     // program          -> declaration* EOF ;
     fn parse_program(&mut self) -> Program {
         let mut program = Program {
+            program_statements: vec![],
+            errors: vec![],
             statements: vec![],
             expressions: vec![],
-            errors: vec![],
         };
 
         loop {
@@ -148,7 +152,7 @@ impl Parser {
             match decl {
                 Ok(stmt) => {
                     if let Some(stmt) = stmt {
-                        program.statements.push(stmt);
+                        program.program_statements.push(stmt);
                     } else {
                         break;
                     }
@@ -159,12 +163,13 @@ impl Parser {
 
         // TODO: Avoid this clone at some point
         program.expressions = self.expressions.clone();
+        program.statements = self.statements.clone();
 
         return program;
     }
 
     // declaration      -> var_decl | fun_decl | statement
-    fn declaration(&mut self) -> Result<Option<Box<Stmt>>, ParseError> {
+    fn declaration(&mut self) -> Result<Option<usize>, ParseError> {
         // TODO: Handle EOF ? Need to return an option ?
 
         match self.current_token() {
@@ -177,7 +182,7 @@ impl Parser {
 
     // statement        -> expr_stmt | if_stmt | block_stmt
     //                   | while_stmt | for_stmt | return_stmt ;
-    fn statement(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn statement(&mut self) -> Result<usize, ParseError> {
         match self.current_token() {
             Token::If => self.if_stmt(),
             Token::For => self.for_stmt(),
@@ -189,15 +194,15 @@ impl Parser {
     }
 
     // expr_stmt        -> expression ";" ;
-    fn expr_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn expr_stmt(&mut self) -> Result<usize, ParseError> {
         let expr = self.expression()?;
         self.consume(Token::Semicolon)?;
 
-        return Ok(Box::new(Stmt::Expr(expr)));
+        return Ok(self.push_statement(Stmt::Expr(expr)));
     }
 
     // var_decl         -> "var" IDENTIFIER ( "=" expression )? ";" ;
-    fn var_decl(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn var_decl(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::Var)?;
 
         let identifier = self.identifier()?;
@@ -210,11 +215,11 @@ impl Parser {
 
         self.consume(Token::Semicolon)?;
 
-        return Ok(Box::new(Stmt::VarDecl { identifier, expr }));
+        return Ok(self.push_statement(Stmt::VarDecl { identifier, expr }));
     }
 
     // function_decl    -> "function" IDENTIFIER "(" parameters? ")" block_stmt ;
-    fn function_decl(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn function_decl(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::Function)?;
 
         let identifier = self.identifier()?;
@@ -237,7 +242,7 @@ impl Parser {
 
         let body = self.block_stmt()?;
 
-        return Ok(Box::new(Stmt::FunctionDecl {
+        return Ok(self.push_statement(Stmt::FunctionDecl {
             identifier,
             args,
             body,
@@ -245,7 +250,7 @@ impl Parser {
     }
 
     // block_stmt       -> "{" ( statement )* "}" ;
-    fn block_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn block_stmt(&mut self) -> Result<usize, ParseError> {
         let start_index = self.current_index;
         self.consume(Token::OpenBrace)?;
 
@@ -266,12 +271,12 @@ impl Parser {
             }
         }
 
-        return Ok(Box::new(Stmt::Block(statements)));
+        return Ok(self.push_statement(Stmt::Block(statements)));
     }
 
     // if_stmt          -> "if" expression block_stmt
     //                     ( "else" if_stmt | block_stmt ) ? ;
-    fn if_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn if_stmt(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::If)?;
 
         let cond = self.expression()?;
@@ -288,7 +293,7 @@ impl Parser {
             };
         }
 
-        return Ok(Box::new(Stmt::If {
+        return Ok(self.push_statement(Stmt::If {
             cond,
             if_block,
             else_block,
@@ -296,19 +301,19 @@ impl Parser {
     }
 
     // while_stmt       -> "while" expression block_stmt ;
-    fn while_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn while_stmt(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::While)?;
         let cond = self.expression()?;
         let block = self.block_stmt()?;
 
-        return Ok(Box::new(Stmt::While { cond, block }));
+        return Ok(self.push_statement(Stmt::While { cond, block }));
     }
 
     // for_stmt         -> "for" (
     //                          ( var_decl | expr_stmt | ";" ) expression? ";" expression? )
     //              TODO:     | ( identifier "in" identifier )
     //                     ) block_stmt ;
-    fn for_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn for_stmt(&mut self) -> Result<usize, ParseError> {
         // TODO: Handle `for i in v` at some point
         self.consume(Token::For)?;
 
@@ -334,30 +339,35 @@ impl Parser {
 
         let body = self.block_stmt()?;
 
-        let mut statements = vec![];
+        let mut body_statements = if let Stmt::Block(ref stmts) = self.statements[body] {
+            stmts.clone()
+        } else {
+            // Does not make any sense to end up there
+            unreachable!()
+        };
 
+        if let Some(increment) = increment {
+            body_statements.push(self.push_statement(Stmt::Expr(increment)));
+        }
+
+        // Override the block statement at body
+        self.statements[body] = Stmt::Block(body_statements);
+
+        let while_stmt = self.push_statement(Stmt::While { cond, block: body });
+
+        let mut statements = vec![];
         if let Some(init) = init {
             statements.push(init);
         }
 
-        if let Stmt::Block(mut body) = *body {
-            if let Some(increment) = increment {
-                body.push(Box::new(Stmt::Expr(increment)));
-            }
+        statements.push(while_stmt);
+        let final_stmt = self.push_statement(Stmt::Block(statements));
 
-            statements.push(Box::new(Stmt::While {
-                cond,
-                block: Box::new(Stmt::Block(body)),
-            }));
-
-            return Ok(Box::new(Stmt::Block(statements)));
-        }
-
-        unreachable!();
+        return Ok(final_stmt);
     }
 
     // return_stmt      -> "return" expression? ";" ;
-    fn return_stmt(&mut self) -> Result<Box<Stmt>, ParseError> {
+    fn return_stmt(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::Return)?;
 
         let mut expr = None;
@@ -368,7 +378,7 @@ impl Parser {
 
         self.consume(Token::Semicolon)?;
 
-        return Ok(Box::new(Stmt::Return(expr)));
+        return Ok(self.push_statement(Stmt::Return(expr)));
     }
 
     // expression   -> assignment ;
@@ -676,6 +686,12 @@ impl Parser {
         return self.current_token();
     }
 
+    fn push_statement(&mut self, stmt: Stmt) -> usize {
+        let index = self.statements.len();
+        self.statements.push(stmt);
+        return index;
+    }
+
     fn push_expression(&mut self, expr: Expr) -> usize {
         let index = self.expressions.len();
         self.expressions.push(expr);
@@ -691,8 +707,9 @@ mod stmt_tests {
 
     fn test_statement(
         input: &str,
-        expected_stmt: Result<Option<Box<Stmt>>, ParseError>,
-        expected_expr: Vec<Expr>,
+        expected_stmt: Result<Option<usize>, ParseError>,
+        expected_stmts: Vec<Stmt>,
+        expected_exprs: Vec<Expr>,
     ) {
         let (tokens, errors) = tokenize(input);
         assert_eq!(errors, vec![]);
@@ -701,25 +718,31 @@ mod stmt_tests {
         let stmt = parser.declaration();
 
         assert_eq!(stmt, expected_stmt);
-        assert_eq!(parser.expressions, expected_expr);
+        assert_eq!(parser.statements, expected_stmts);
+        assert_eq!(parser.expressions, expected_exprs);
     }
 
     #[test]
     fn empty_declaration() {
-        test_statement("", Ok(None), vec![]);
+        test_statement("", Ok(None), vec![], vec![]);
     }
 
     #[test]
-    fn expr_stmt() {
+    fn expr_simple() {
         test_statement(
             "42;",
-            Ok(Some(Box::new(Stmt::Expr(0)))),
+            Ok(Some(0)),
+            vec![Stmt::Expr(0)],
             vec![Expr::Number(42.0)],
         );
+    }
 
+    #[test]
+    fn expr_complex() {
         test_statement(
             "true or false and 42 < 43;",
-            Ok(Some(Box::new(Stmt::Expr(6)))),
+            Ok(Some(0)),
+            vec![Stmt::Expr(6)],
             vec![
                 Expr::Boolean(true),
                 Expr::Boolean(false),
@@ -745,25 +768,33 @@ mod stmt_tests {
     }
 
     #[test]
-    fn var_decl() {
+    fn var_decl_no_value() {
         test_statement(
             "var foo;",
-            Ok(Some(Box::new(Stmt::VarDecl {
+            Ok(Some(0)),
+            vec![Stmt::VarDecl {
                 identifier: "foo".to_string(),
                 expr: None,
-            }))),
+            }],
             vec![],
         );
+    }
 
+    #[test]
+    fn var_decl_string_value() {
         test_statement(
             "var toto = \"tata\";",
-            Ok(Some(Box::new(Stmt::VarDecl {
+            Ok(Some(0)),
+            vec![Stmt::VarDecl {
                 identifier: "toto".to_string(),
                 expr: Some(0),
-            }))),
+            }],
             vec![Expr::String("tata".to_string())],
         );
+    }
 
+    #[test]
+    fn var_decl_missing_semicolon() {
         test_statement(
             "var bar",
             Err(ParseError::UnexpectedToken {
@@ -772,8 +803,12 @@ mod stmt_tests {
                 position: 2,
             }),
             vec![],
+            vec![],
         );
+    }
 
+    #[test]
+    fn var_decl_with_value_missing_semicolon() {
         test_statement(
             "var baz = 42",
             Err(ParseError::UnexpectedToken {
@@ -781,40 +816,50 @@ mod stmt_tests {
                 found: Token::EOF,
                 position: 4,
             }),
+            vec![],
             vec![Expr::Number(42.0)],
         );
     }
 
     #[test]
-    fn block_statement() {
-        test_statement("{}", Ok(Some(Box::new(Stmt::Block(vec![])))), vec![]);
+    fn empty_block() {
+        test_statement("{}", Ok(Some(0)), vec![Stmt::Block(vec![])], vec![]);
+    }
 
+    #[test]
+    fn block_with_one_statement() {
         test_statement(
             "{42;}",
-            Ok(Some(Box::new(Stmt::Block(vec![Box::new(Stmt::Expr(0))])))),
+            Ok(Some(1)),
+            vec![Stmt::Expr(0), Stmt::Block(vec![0])],
             vec![Expr::Number(42.0)],
         );
+    }
 
+    #[test]
+    fn block_with_multiple_statements() {
         test_statement(
             r#"{
-                var foo = 42;
-                var bar = 1337;
-                var baz = foo + bar;
-            }"#,
-            Ok(Some(Box::new(Stmt::Block(vec![
-                Box::new(Stmt::VarDecl {
+                    var foo = 42;
+                    var bar = 1337;
+                    var baz = foo + bar;
+                }"#,
+            Ok(Some(3)),
+            vec![
+                Stmt::VarDecl {
                     identifier: "foo".to_string(),
                     expr: Some(0),
-                }),
-                Box::new(Stmt::VarDecl {
+                },
+                Stmt::VarDecl {
                     identifier: "bar".to_string(),
                     expr: Some(1),
-                }),
-                Box::new(Stmt::VarDecl {
+                },
+                Stmt::VarDecl {
                     identifier: "baz".to_string(),
                     expr: Some(4),
-                }),
-            ])))),
+                },
+                Stmt::Block(vec![0, 1, 2]),
+            ],
             vec![
                 Expr::Number(42.0),
                 Expr::Number(1337.0),
@@ -827,49 +872,74 @@ mod stmt_tests {
                 },
             ],
         );
+    }
 
+    #[test]
+    fn block_error_missing_brace() {
         test_statement(
             "{ 42; ",
             Err(ParseError::UnexpectedEndOfFile {
                 expected: Token::CloseBrace,
                 position: 0,
             }),
+            vec![Stmt::Expr(0)],
             vec![Expr::Number(42.0)],
         );
     }
 
     #[test]
-    fn function_decl() {
+    fn function_decl_1() {
         test_statement(
             "fn foo() {}",
-            Ok(Some(Box::new(Stmt::FunctionDecl {
-                identifier: "foo".to_string(),
-                args: vec![],
-                body: Box::new(Stmt::Block(vec![])),
-            }))),
+            Ok(Some(1)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::FunctionDecl {
+                    identifier: "foo".to_string(),
+                    args: vec![],
+                    body: 0,
+                },
+            ],
             vec![],
         );
+    }
 
+    #[test]
+    fn function_decl_2() {
         test_statement(
             "fn foo(a) {}",
-            Ok(Some(Box::new(Stmt::FunctionDecl {
-                identifier: "foo".to_string(),
-                args: vec!["a".to_string()],
-                body: Box::new(Stmt::Block(vec![])),
-            }))),
+            Ok(Some(1)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::FunctionDecl {
+                    identifier: "foo".to_string(),
+                    args: vec!["a".to_string()],
+                    body: 0,
+                },
+            ],
             vec![],
         );
+    }
 
+    #[test]
+    fn function_decl_3() {
         test_statement(
             "fn foo(bar, baz) {}",
-            Ok(Some(Box::new(Stmt::FunctionDecl {
-                identifier: "foo".to_string(),
-                args: vec!["bar".to_string(), "baz".to_string()],
-                body: Box::new(Stmt::Block(vec![])),
-            }))),
+            Ok(Some(1)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::FunctionDecl {
+                    identifier: "foo".to_string(),
+                    args: vec!["bar".to_string(), "baz".to_string()],
+                    body: 0,
+                },
+            ],
             vec![],
         );
+    }
 
+    #[test]
+    fn function_decl_4() {
         test_statement(
             "fn foo(bar, baz {}",
             Err(ParseError::UnexpectedToken {
@@ -878,67 +948,104 @@ mod stmt_tests {
                 position: 6,
             }),
             vec![],
+            vec![],
         );
     }
 
     #[test]
-    fn if_stmt() {
+    fn if_stmt_1() {
         test_statement(
             "if true {}",
-            Ok(Some(Box::new(Stmt::If {
-                cond: 0,
-                if_block: Box::new(Stmt::Block(vec![])),
-                else_block: None,
-            }))),
+            Ok(Some(1)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::If {
+                    cond: 0,
+                    if_block: 0,
+                    else_block: None,
+                },
+            ],
             vec![Expr::Boolean(true)],
         );
+    }
 
+    #[test]
+    fn if_stmt_2() {
         test_statement(
             "if false {} else {}",
-            Ok(Some(Box::new(Stmt::If {
-                cond: 0,
-                if_block: Box::new(Stmt::Block(vec![])),
-                else_block: Some(Box::new(Stmt::Block(vec![]))),
-            }))),
+            Ok(Some(2)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::Block(vec![]),
+                Stmt::If {
+                    cond: 0,
+                    if_block: 0,
+                    else_block: Some(1),
+                },
+            ],
             vec![Expr::Boolean(false)],
         );
+    }
 
+    #[test]
+    fn if_stmt_3() {
         test_statement(
             "if false {} else if true {}",
-            Ok(Some(Box::new(Stmt::If {
-                cond: 0,
-                if_block: Box::new(Stmt::Block(vec![])),
-                else_block: Some(Box::new(Stmt::If {
+            Ok(Some(3)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::Block(vec![]),
+                Stmt::If {
                     cond: 1,
-                    if_block: Box::new(Stmt::Block(vec![])),
+                    if_block: 1,
                     else_block: None,
-                })),
-            }))),
+                },
+                Stmt::If {
+                    cond: 0,
+                    if_block: 0,
+                    else_block: Some(2),
+                },
+            ],
             vec![Expr::Boolean(false), Expr::Boolean(true)],
         );
+    }
 
+    #[test]
+    fn if_stmt_4() {
         test_statement(
             "if false {} else if true {} else if false {} else {}",
-            Ok(Some(Box::new(Stmt::If {
-                cond: 0,
-                if_block: Box::new(Stmt::Block(vec![])),
-                else_block: Some(Box::new(Stmt::If {
+            Ok(Some(6)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::Block(vec![]),
+                Stmt::Block(vec![]),
+                Stmt::Block(vec![]),
+                Stmt::If {
+                    cond: 2,
+                    if_block: 2,
+                    else_block: Some(3),
+                },
+                Stmt::If {
                     cond: 1,
-                    if_block: Box::new(Stmt::Block(vec![])),
-                    else_block: Some(Box::new(Stmt::If {
-                        cond: 2,
-                        if_block: Box::new(Stmt::Block(vec![])),
-                        else_block: Some(Box::new(Stmt::Block(vec![]))),
-                    })),
-                })),
-            }))),
+                    if_block: 1,
+                    else_block: Some(4),
+                },
+                Stmt::If {
+                    cond: 0,
+                    if_block: 0,
+                    else_block: Some(5),
+                },
+            ],
             vec![
                 Expr::Boolean(false),
                 Expr::Boolean(true),
                 Expr::Boolean(false),
             ],
         );
+    }
 
+    #[test]
+    fn if_stmt_5() {
         test_statement(
             "if false else {}",
             Err(ParseError::UnexpectedToken {
@@ -946,27 +1053,33 @@ mod stmt_tests {
                 found: Token::Else,
                 position: 2,
             }),
-            vec![Expr::Boolean(false)],
-        );
-
-        test_statement(
-            "if false {} else foo;",
-            Err(ParseError::Todo),
+            vec![],
             vec![Expr::Boolean(false)],
         );
     }
 
     #[test]
-    fn while_stmt() {
+    fn if_stmt_6() {
+        test_statement(
+            "if false {} else foo;",
+            Err(ParseError::Todo),
+            vec![Stmt::Block(vec![])],
+            vec![Expr::Boolean(false)],
+        );
+    }
+
+    #[test]
+    fn while_stmt_1() {
         test_statement(
             "while true {}",
-            Ok(Some(Box::new(Stmt::While {
-                cond: 0,
-                block: Box::new(Stmt::Block(vec![])),
-            }))),
+            Ok(Some(1)),
+            vec![Stmt::Block(vec![]), Stmt::While { cond: 0, block: 0 }],
             vec![Expr::Boolean(true)],
         );
+    }
 
+    #[test]
+    fn while_stmt_2() {
         test_statement(
             "while false;",
             Err(ParseError::UnexpectedToken {
@@ -974,30 +1087,36 @@ mod stmt_tests {
                 found: Token::Semicolon,
                 position: 2,
             }),
+            vec![],
             vec![Expr::Boolean(false)],
         );
     }
 
     #[test]
-    fn for_stmt() {
+    fn for_empty() {
         test_statement(
             "for ;; {}",
-            Ok(Some(Box::new(Stmt::Block(vec![Box::new(Stmt::While {
-                cond: 0,
-                block: Box::new(Stmt::Block(vec![])),
-            })])))),
+            Ok(Some(2)),
+            vec![
+                Stmt::Block(vec![]),
+                Stmt::While { cond: 0, block: 0 },
+                Stmt::Block(vec![1]),
+            ],
             vec![Expr::Boolean(true)],
         );
+    }
 
+    #[test]
+    fn for_assign_init() {
         test_statement(
             "for i = 0;; {}",
-            Ok(Some(Box::new(Stmt::Block(vec![
-                Box::new(Stmt::Expr(2)),
-                Box::new(Stmt::While {
-                    cond: 3,
-                    block: Box::new(Stmt::Block(vec![])),
-                }),
-            ])))),
+            Ok(Some(3)),
+            vec![
+                Stmt::Expr(2),
+                Stmt::Block(vec![]),
+                Stmt::While { cond: 3, block: 1 },
+                Stmt::Block(vec![0, 2]),
+            ],
             vec![
                 Expr::Identifier("i".to_string()),
                 Expr::Number(0.0),
@@ -1009,37 +1128,42 @@ mod stmt_tests {
                 Expr::Boolean(true),
             ],
         );
+    }
 
+    #[test]
+    fn for_var_decl_init() {
         test_statement(
             "for var i = 0;; {}",
-            Ok(Some(Box::new(Stmt::Block(vec![
-                Box::new(Stmt::VarDecl {
+            Ok(Some(3)),
+            vec![
+                Stmt::VarDecl {
                     identifier: "i".to_string(),
                     expr: Some(0),
-                }),
-                Box::new(Stmt::While {
-                    cond: 1,
-                    block: Box::new(Stmt::Block(vec![])),
-                }),
-            ])))),
+                },
+                Stmt::Block(vec![]),
+                Stmt::While { cond: 1, block: 1 },
+                Stmt::Block(vec![0, 2]),
+            ],
             vec![Expr::Number(0.0), Expr::Boolean(true)],
         );
+    }
 
+    #[test]
+    fn for_complete() {
         test_statement(
             "for var i = 0; i < 10; i = i + 1 { print(i); }",
-            Ok(Some(Box::new(Stmt::Block(vec![
-                Box::new(Stmt::VarDecl {
+            Ok(Some(5)),
+            vec![
+                Stmt::VarDecl {
                     identifier: "i".to_string(),
                     expr: Some(0),
-                }),
-                Box::new(Stmt::While {
-                    cond: 3,
-                    block: Box::new(Stmt::Block(vec![
-                        Box::new(Stmt::Expr(11)),
-                        Box::new(Stmt::Expr(8)),
-                    ])),
-                }),
-            ])))),
+                },
+                Stmt::Expr(11),
+                Stmt::Block(vec![1, 3]),
+                Stmt::Expr(8),
+                Stmt::While { cond: 3, block: 2 },
+                Stmt::Block(vec![0, 4]),
+            ],
             vec![
                 Expr::Number(0.0),
                 Expr::Identifier("i".to_string()),
@@ -1073,14 +1197,18 @@ mod stmt_tests {
     }
 
     #[test]
-    fn return_stmt() {
+    fn return_empty() {
+        test_statement("return;", Ok(Some(0)), vec![Stmt::Return(None)], vec![]);
+    }
+
+    #[test]
+    fn return_expr() {
         test_statement(
             "return 42;",
-            Ok(Some(Box::new(Stmt::Return(Some(0))))),
+            Ok(Some(0)),
+            vec![Stmt::Return(Some(0))],
             vec![Expr::Number(42.0)],
         );
-
-        test_statement("return;", Ok(Some(Box::new(Stmt::Return(None)))), vec![]);
     }
 
     // TODO: Test program
@@ -1106,14 +1234,35 @@ mod expr_tests {
     }
 
     #[test]
-    fn primary_expressions() {
+    fn primary_number_1() {
         test_expression("42", Ok(vec![Expr::Number(42.0)]));
+    }
+
+    #[test]
+    fn primary_number_2() {
+        test_expression("13.37", Ok(vec![Expr::Number(13.37)]));
+    }
+
+    #[test]
+    fn primary_bool_true() {
         test_expression("true", Ok(vec![Expr::Boolean(true)]));
+    }
+
+    #[test]
+    fn primary_bool_false() {
+        test_expression("false", Ok(vec![Expr::Boolean(false)]));
+    }
+
+    #[test]
+    fn primary_string() {
         test_expression(
             "\"hello, world\"",
             Ok(vec![Expr::String("hello, world".into())]),
         );
+    }
 
+    #[test]
+    fn primary_invalid() {
         test_expression(
             "if",
             Err(ParseError::InvalidTokenType {
@@ -1147,7 +1296,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn unary_expressions() {
+    fn unary_minus() {
         test_expression(
             "-42",
             Ok(vec![
@@ -1158,7 +1307,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn unary_not() {
         test_expression(
             "not false",
             Ok(vec![
@@ -1172,7 +1324,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn term_expressions() {
+    fn term_add() {
         test_expression(
             "1 + 2",
             Ok(vec![
@@ -1185,7 +1337,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn term_substract() {
         test_expression(
             "4.2 - 13.37",
             Ok(vec![
@@ -1201,7 +1356,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn factor_expressions() {
+    fn factor_multiply() {
         test_expression(
             "2 * 3",
             Ok(vec![
@@ -1214,7 +1369,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn factor_divide() {
         test_expression(
             "7 / 4",
             Ok(vec![
@@ -1230,7 +1388,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn logic_or_expressions() {
+    fn logic_or() {
         test_expression(
             "true or false",
             Ok(vec![
@@ -1246,7 +1404,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn logic_and_expressions() {
+    fn logic_and() {
         test_expression(
             "false and true",
             Ok(vec![
@@ -1262,7 +1420,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn equality_expressions() {
+    fn equality_equal() {
         test_expression(
             "33.0 == false",
             Ok(vec![
@@ -1275,7 +1433,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn equality_not_equal() {
         test_expression(
             "\"hello\" != \"test\"",
             Ok(vec![
@@ -1291,7 +1452,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn comparison_expressions() {
+    fn comparison_gt() {
         test_expression(
             "42 > 33",
             Ok(vec![
@@ -1304,7 +1465,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn comparison_ge() {
         test_expression(
             "42 >= 33",
             Ok(vec![
@@ -1317,7 +1481,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn comparison_lt() {
         test_expression(
             "42 < 33",
             Ok(vec![
@@ -1330,7 +1497,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn comparison_le() {
         test_expression(
             "42 <= 33",
             Ok(vec![
@@ -1346,7 +1516,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn call_expressions() {
+    fn call_no_args() {
         test_expression(
             "foo()",
             Ok(vec![
@@ -1357,7 +1527,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn call_multiple_args() {
         test_expression(
             "bar(\"test\", 39 + 3)",
             Ok(vec![
@@ -1376,7 +1549,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn call_invalid_name() {
         test_expression(
             "4()",
             Err(ParseError::UnexpectedToken {
@@ -1385,7 +1561,10 @@ mod expr_tests {
                 position: 0,
             }),
         );
+    }
 
+    #[test]
+    fn call_missing_close_paren() {
         test_expression(
             "baz(42",
             Err(ParseError::UnexpectedToken {
@@ -1397,7 +1576,7 @@ mod expr_tests {
     }
 
     #[test]
-    fn assignment_expressions() {
+    fn assign_number() {
         test_expression(
             "a = 42",
             Ok(vec![
@@ -1410,7 +1589,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn assign_binary() {
         test_expression(
             "foo=15+27",
             Ok(vec![
@@ -1429,7 +1611,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn assign_not_an_identifier() {
         test_expression(
             "27 = 42",
             Err(ParseError::UnexpectedToken {
@@ -1438,7 +1623,10 @@ mod expr_tests {
                 position: 0,
             }),
         );
+    }
 
+    #[test]
+    fn assign_plus_equal() {
         test_expression(
             "a += 2",
             Ok(vec![
@@ -1451,7 +1639,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn assign_minus_equal() {
         test_expression(
             "a -= 2",
             Ok(vec![
@@ -1464,7 +1655,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn assign_times_equal() {
         test_expression(
             "a *= 2",
             Ok(vec![
@@ -1477,7 +1671,10 @@ mod expr_tests {
                 },
             ]),
         );
+    }
 
+    #[test]
+    fn assign_slash_equal() {
         test_expression(
             "a /= 2",
             Ok(vec![

@@ -31,7 +31,7 @@ enum FlowControl {
 #[derive(Debug, Clone)]
 enum Function {
     Native(NativeFunction),
-    UserDefined { args: Vec<String>, body: Box<Stmt> },
+    UserDefined { args: Vec<String>, body: usize },
 }
 
 #[derive(Debug)]
@@ -116,6 +116,7 @@ pub struct Context<'a> {
     frames: FrameStack,
     epoch: std::time::Instant,
 
+    stmt_pool: &'a [Stmt],
     expr_pool: &'a [Expr],
 }
 
@@ -130,6 +131,7 @@ impl<'a> Context<'a> {
             writer,
             frames: FrameStack::new(),
             epoch: std::time::Instant::now(),
+            stmt_pool: Default::default(),
             expr_pool: Default::default(),
         };
     }
@@ -180,10 +182,11 @@ fn interpret_with_context<'a>(ctx: &'a mut Context<'a>, prg: &'a Program) {
     ctx.frames
         .declare_function("time", &Function::Native(native_time));
 
+    ctx.stmt_pool = &prg.statements;
     ctx.expr_pool = &prg.expressions;
 
-    for stmt in &prg.statements {
-        match interpret_stmt(ctx, stmt) {
+    for stmt in &prg.program_statements {
+        match interpret_stmt(ctx, *stmt) {
             Ok(_) => {}
             Err(err) => {
                 println!("Runtime error: {:?}", err);
@@ -193,20 +196,20 @@ fn interpret_with_context<'a>(ctx: &'a mut Context<'a>, prg: &'a Program) {
     }
 }
 
-fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, RuntimeError> {
-    let result = match **stmt {
+fn interpret_stmt(ctx: &mut Context, stmt: usize) -> Result<FlowControl, RuntimeError> {
+    let result = match &ctx.stmt_pool[stmt] {
         Stmt::Expr(expr) => {
-            interpret_expr(ctx, expr)?;
+            interpret_expr(ctx, *expr)?;
             FlowControl::None
         }
 
-        Stmt::Block(ref stmts) => {
+        Stmt::Block(stmts) => {
             ctx.frames.push_frame();
 
             let mut block_result = FlowControl::None;
 
             for stmt in stmts {
-                block_result = interpret_stmt(ctx, stmt)?;
+                block_result = interpret_stmt(ctx, *stmt)?;
 
                 match &block_result {
                     FlowControl::Return(_) => break,
@@ -219,44 +222,41 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
             block_result
         }
 
-        Stmt::VarDecl {
-            ref identifier,
-            expr,
-        } => {
+        Stmt::VarDecl { identifier, expr } => {
             let value = match expr {
-                Some(expr) => interpret_expr(ctx, expr)?,
+                Some(expr) => interpret_expr(ctx, *expr)?,
                 None => Value::Nil,
             };
 
-            ctx.frames.declare_variable(&identifier, value);
+            ctx.frames.declare_variable(identifier, value);
 
             FlowControl::None
         }
 
         Stmt::FunctionDecl {
-            ref identifier,
-            ref args,
-            ref body,
+            identifier,
+            args,
+            body,
         } => {
             let function = Function::UserDefined {
                 args: args.clone(),
                 body: body.clone(),
             };
 
-            ctx.frames.declare_function(&identifier, &function);
+            ctx.frames.declare_function(identifier, &function);
 
             FlowControl::None
         }
 
         Stmt::If {
             cond,
-            ref if_block,
-            ref else_block,
+            if_block,
+            else_block,
         } => {
-            let flow_control = if interpret_expr(ctx, cond)?.is_truthy() {
-                interpret_stmt(ctx, if_block)?
+            let flow_control = if interpret_expr(ctx, *cond)?.is_truthy() {
+                interpret_stmt(ctx, *if_block)?
             } else if let Some(else_block) = else_block {
-                interpret_stmt(ctx, else_block)?
+                interpret_stmt(ctx, *else_block)?
             } else {
                 FlowControl::None
             };
@@ -264,11 +264,11 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
             flow_control
         }
 
-        Stmt::While { cond, ref block } => interpret_while(ctx, cond, block)?,
+        Stmt::While { cond, block } => interpret_while(ctx, *cond, *block)?,
 
         Stmt::Return(expr) => {
             if let Some(expr) = expr {
-                FlowControl::Return(interpret_expr(ctx, expr)?)
+                FlowControl::Return(interpret_expr(ctx, *expr)?)
             } else {
                 FlowControl::Return(Value::Nil)
             }
@@ -281,7 +281,7 @@ fn interpret_stmt(ctx: &mut Context, stmt: &Box<Stmt>) -> Result<FlowControl, Ru
 fn interpret_while(
     ctx: &mut Context,
     cond: usize,
-    body: &Box<Stmt>,
+    body: usize,
 ) -> Result<FlowControl, RuntimeError> {
     while interpret_expr(ctx, cond)?.is_truthy() {
         match interpret_stmt(ctx, body)? {
@@ -341,12 +341,11 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
 
             ctx.frames.push_frame();
 
-            let result = match function {
+            let result = match &function {
                 Function::Native(function) => function(ctx, &args)?,
-                Function::UserDefined {
-                    args: ref params,
-                    ref body,
-                } => call_user_function(ctx, &params, &args, body)?,
+                Function::UserDefined { args: params, body } => {
+                    call_user_function(ctx, &params, &args, *body)?
+                }
             };
 
             ctx.frames.pop_frame();
@@ -363,7 +362,7 @@ fn call_user_function(
     ctx: &mut Context,
     params: &[String],
     args: &[Value],
-    body: &Box<Stmt>,
+    body: usize,
 ) -> Result<FlowControl, RuntimeError> {
     let arity = args.len();
 
@@ -782,7 +781,7 @@ mod expression_tests {
 
         ctx.expr_pool = &program.expressions;
 
-        match *program.statements[0] {
+        match program.statements[program.program_statements[0]] {
             Stmt::Expr(expr) => {
                 let result = interpret_expr(&mut ctx, expr);
 
