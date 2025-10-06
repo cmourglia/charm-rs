@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-use crate::lexer::Token;
-use crate::parser::{Expr, Program, Stmt};
-use crate::value::Value;
+use super::value::Value;
+use crate::lexer::token::Token;
+use crate::parser::parser::{Expr, Program, Stmt};
 use crate::variant_eq;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -559,7 +559,7 @@ mod program_tests {
         sync::{Arc, Mutex},
     };
 
-    use crate::{lexer::tokenize, parser::parse};
+    use crate::{lexer::lexer::tokenize, parser::parser::parse};
 
     use super::*;
 
@@ -765,7 +765,7 @@ mod program_tests {
 
 #[cfg(test)]
 mod expression_tests {
-    use crate::{lexer::tokenize, parser::parse};
+    use crate::{lexer::lexer::tokenize, parser::parser::parse};
 
     use super::*;
 

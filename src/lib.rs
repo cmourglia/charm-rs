@@ -1,9 +1,11 @@
-use crate::{interpreter::interpret, lexer::tokenize, parser::parse};
+use crate::interpreter::interpreter::interpret;
+use crate::lexer::lexer::tokenize;
+use crate::parser::parser::parse;
 
+mod compiler;
 mod interpreter;
 mod lexer;
 mod parser;
-mod value;
 
 pub fn interpret_program(input: &str) {
     let (tokens, lex_errors) = tokenize(input);
