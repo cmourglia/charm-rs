@@ -10,7 +10,7 @@ pub enum RuntimeError {
     IoError(String),
     VariableNotDeclared(String),
     InvalidType(String),
-    TypeMismatch { old_value: Value, new_value: Value },
+    TypeMismatch { old_value: Type, new_value: Type },
     InvalidNumberOfParameters,
 }
 
@@ -34,6 +34,7 @@ struct UserFunction {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[allow(unpredictable_function_pointer_comparisons)]
 enum Value {
     Nil,
     Number(f64),
@@ -47,6 +48,25 @@ impl Value {
         match self {
             Self::Boolean(b) => *b,
             _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Type {
+    Nil,
+    Number,
+    Boolean,
+    Function,
+}
+
+impl Type {
+    fn from_value(value: &Value) -> Self {
+        match value {
+            Value::Nil => Type::Nil,
+            Value::Number(_) => Type::Number,
+            Value::Boolean(_) => Type::Boolean,
+            Value::NativeFunction(_) | Value::UserFunction(_) => Type::Function,
         }
     }
 }
@@ -104,14 +124,6 @@ impl FrameStack {
         }
 
         return Err(RuntimeError::VariableNotDeclared(name.to_string()));
-    }
-
-    pub fn declare_native_function(&mut self, name: &str, value: &Value) {
-        self.frames
-            .last_mut()
-            .unwrap()
-            .variables
-            .insert(name.to_string(), value.clone());
     }
 }
 
@@ -328,8 +340,8 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
 
             if old_value != Value::Nil && !variant_eq(&old_value, &new_value) {
                 return Err(RuntimeError::TypeMismatch {
-                    old_value,
-                    new_value,
+                    old_value: Type::from_value(&old_value),
+                    new_value: Type::from_value(&new_value),
                 });
             }
 
