@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-use super::value::Value;
 use crate::lexer::token::Token;
 use crate::parser::parser::{Expr, Program, Stmt};
 use crate::variant_eq;
@@ -10,7 +9,7 @@ use crate::variant_eq;
 pub enum RuntimeError {
     IoError(String),
     VariableNotDeclared(String),
-    FunctionNotDeclared(String),
+    InvalidType(String),
     TypeMismatch { old_value: Value, new_value: Value },
     InvalidNumberOfParameters,
 }
@@ -21,23 +20,40 @@ impl From<io::Error> for RuntimeError {
     }
 }
 
-type NativeFunction = fn(&mut Context, &[Value]) -> Result<FlowControl, RuntimeError>;
-
 enum FlowControl {
     None,
     Return(Value),
 }
 
-#[derive(Debug, Clone)]
-enum Function {
-    Native(NativeFunction),
-    UserDefined { args: Vec<String>, body: usize },
+type NativeFunction = fn(&mut Context, &[Value]) -> Result<FlowControl, RuntimeError>;
+
+#[derive(Debug, PartialEq, Clone)]
+struct UserFunction {
+    pub args: Vec<String>,
+    pub body: usize,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Value {
+    Nil,
+    Number(f64),
+    Boolean(bool),
+    NativeFunction(NativeFunction),
+    UserFunction(UserFunction),
+}
+
+impl Value {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Self::Boolean(b) => *b,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]
 struct Frame {
     variables: HashMap<String, Value>, // TODO: Get rid of the copies at some point
-    functions: HashMap<String, Function>,
 }
 
 #[derive(Debug)]
@@ -53,7 +69,6 @@ impl FrameStack {
     pub fn push_frame(&mut self) {
         self.frames.push(Frame {
             variables: HashMap::new(),
-            functions: HashMap::new(),
         });
     }
 
@@ -91,22 +106,11 @@ impl FrameStack {
         return Err(RuntimeError::VariableNotDeclared(name.to_string()));
     }
 
-    // FIXME: Should this return a ref or a clone of the value ?
-    pub fn get_function(&self, name: &str) -> Result<Function, RuntimeError> {
-        for frame in self.frames.iter().rev() {
-            if let Some(value) = frame.functions.get(&name.to_string()) {
-                return Ok(value.clone());
-            }
-        }
-
-        return Err(RuntimeError::FunctionNotDeclared(name.to_string()));
-    }
-
-    pub fn declare_function(&mut self, name: &str, value: &Function) {
+    pub fn declare_native_function(&mut self, name: &str, value: &Value) {
         self.frames
             .last_mut()
             .unwrap()
-            .functions
+            .variables
             .insert(name.to_string(), value.clone());
     }
 }
@@ -149,6 +153,8 @@ fn native_print(ctx: &mut Context, values: &[Value]) -> Result<FlowControl, Runt
             Value::Nil => write!(ctx.writer, "<nil>")?,
             Value::Number(n) => write!(ctx.writer, "{}", n)?,
             Value::Boolean(b) => write!(ctx.writer, "{}", b)?,
+            Value::NativeFunction(_f) => write!(ctx.writer, "<native function>: todo!")?,
+            Value::UserFunction(_f) => write!(ctx.writer, "<user function>: todo!")?,
         }
 
         first = false;
@@ -177,10 +183,11 @@ fn interpret_with_context<'a>(ctx: &'a mut Context<'a>, prg: &'a Program) {
     // Global layer
     ctx.frames.push_frame();
 
-    ctx.frames
-        .declare_function("print", &Function::Native(native_print));
-    ctx.frames
-        .declare_function("time", &Function::Native(native_time));
+    let native_print_fn = Value::NativeFunction(native_print);
+    let native_time_fn = Value::NativeFunction(native_time);
+
+    ctx.frames.declare_variable("print", native_print_fn);
+    ctx.frames.declare_variable("time", native_time_fn);
 
     ctx.stmt_pool = &prg.statements;
     ctx.expr_pool = &prg.expressions;
@@ -238,12 +245,12 @@ fn interpret_stmt(ctx: &mut Context, stmt: usize) -> Result<FlowControl, Runtime
             args,
             body,
         } => {
-            let function = Function::UserDefined {
+            let function = Value::UserFunction(UserFunction {
                 args: args.clone(),
                 body: body.clone(),
-            };
+            });
 
-            ctx.frames.declare_function(identifier, &function);
+            ctx.frames.declare_variable(identifier, function);
 
             FlowControl::None
         }
@@ -332,7 +339,7 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
         }
 
         Expr::Call { callee, arguments } => {
-            let function = ctx.frames.get_function(&callee)?;
+            let function = ctx.frames.get_variable(&callee)?;
 
             let mut args = Vec::new();
             for arg in arguments {
@@ -342,10 +349,9 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
             ctx.frames.push_frame();
 
             let result = match &function {
-                Function::Native(function) => function(ctx, &args)?,
-                Function::UserDefined { args: params, body } => {
-                    call_user_function(ctx, &params, &args, *body)?
-                }
+                Value::NativeFunction(function) => function(ctx, &args)?,
+                Value::UserFunction(function) => call_user_function(ctx, &function, &args)?,
+                _ => return Err(RuntimeError::InvalidType(callee.to_string())),
             };
 
             ctx.frames.pop_frame();
@@ -360,21 +366,21 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
 
 fn call_user_function(
     ctx: &mut Context,
-    params: &[String],
-    args: &[Value],
-    body: usize,
+    function: &UserFunction,
+    params: &[Value],
 ) -> Result<FlowControl, RuntimeError> {
-    let arity = args.len();
+    let arity = function.args.len();
 
     if params.len() != arity {
         return Err(RuntimeError::InvalidNumberOfParameters);
     }
 
     for i in 0..arity {
-        ctx.frames.declare_variable(&params[i], args[i].clone());
+        ctx.frames
+            .declare_variable(&function.args[i], params[i].clone());
     }
 
-    return interpret_stmt(ctx, body);
+    return interpret_stmt(ctx, function.body);
 }
 
 fn binary_expr(
@@ -851,7 +857,7 @@ mod expression_tests {
 
         test_eval_expression(
             "print(42);",
-            Err(RuntimeError::FunctionNotDeclared("print".to_string())),
+            Err(RuntimeError::VariableNotDeclared("print".to_string())),
         );
     }
 }
