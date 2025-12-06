@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-use crate::lexer::token::Token;
-use crate::parser::parser::{Expr, Program, Stmt};
-use crate::variant_eq;
+use crate::parser::{Expr, Program, Stmt};
+use crate::token::Token;
+use crate::utils::variant_eq;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeError {
@@ -185,7 +185,7 @@ fn native_time(ctx: &mut Context, _: &[Value]) -> Result<FlowControl, RuntimeErr
     return Ok(FlowControl::Return(Value::Number(elapsed)));
 }
 
-pub fn interpret(prg: &Program) {
+pub fn treewalk_interpret(prg: &Program) {
     let mut ctx = Context::new();
 
     interpret_with_context(&mut ctx, prg);
@@ -577,7 +577,7 @@ mod program_tests {
         sync::{Arc, Mutex},
     };
 
-    use crate::{lexer::lexer::tokenize, parser::parser::parse};
+    use crate::{lexer::tokenize, parser::parse};
 
     use super::*;
 
@@ -783,7 +783,7 @@ mod program_tests {
 
 #[cfg(test)]
 mod expression_tests {
-    use crate::{lexer::lexer::tokenize, parser::parser::parse};
+    use crate::{lexer::tokenize, parser::parse};
 
     use super::*;
 

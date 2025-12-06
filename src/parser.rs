@@ -30,7 +30,7 @@
 // primary      -> NUMBER | STRING | "true" | "false" | "nil"
 //               | "(" expression ")" | IDENTIFIER;
 
-use crate::{lexer::token::Token, variant_eq};
+use crate::{token::Token, utils::variant_eq};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
@@ -701,7 +701,7 @@ impl Parser {
 
 #[cfg(test)]
 mod stmt_tests {
-    use crate::lexer::lexer::tokenize;
+    use crate::lexer::tokenize;
 
     use super::*;
 
@@ -1216,7 +1216,7 @@ mod stmt_tests {
 
 #[cfg(test)]
 mod expr_tests {
-    use crate::lexer::lexer::tokenize;
+    use crate::lexer::tokenize;
 
     use super::*;
 
