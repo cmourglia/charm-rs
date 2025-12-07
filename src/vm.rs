@@ -19,7 +19,7 @@ pub enum RuntimeError {
 
 impl From<std::io::Error> for RuntimeError {
     fn from(error: std::io::Error) -> Self {
-        return RuntimeError::IoError(error.to_string());
+        RuntimeError::IoError(error.to_string())
     }
 }
 
@@ -72,7 +72,7 @@ impl<'a> Vm<'a> {
                 }
                 Opcode::Constant(index) => {
                     let constant = &self.chunk.constants[index];
-                    self.stack.push(constant.clone());
+                    self.stack.push(*constant);
                 }
                 Opcode::Negate => match self.pop()? {
                     Value::Number(n) => self.stack.push(Value::Number(-n)),
@@ -81,8 +81,6 @@ impl<'a> Vm<'a> {
                 Opcode::Add | Opcode::Subtract | Opcode::Multiply | Opcode::Divide => {
                     self.binary_op(op)?;
                 }
-
-                _ => todo!(),
             }
 
             self.ip += 1;

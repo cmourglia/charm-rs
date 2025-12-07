@@ -115,7 +115,7 @@ pub struct Program {
 // NOTE: Will change
 pub fn parse(tokens: Vec<Token>) -> Program {
     let mut parser = Parser::new(tokens);
-    return parser.parse_program();
+    parser.parse_program()
 }
 
 struct Parser {
@@ -165,7 +165,7 @@ impl Parser {
         program.expressions = self.expressions.clone();
         program.statements = self.statements.clone();
 
-        return program;
+        program
     }
 
     // declaration      -> var_decl | fun_decl | statement
@@ -198,7 +198,7 @@ impl Parser {
         let expr = self.expression()?;
         self.consume(Token::Semicolon)?;
 
-        return Ok(self.push_statement(Stmt::Expr(expr)));
+        Ok(self.push_statement(Stmt::Expr(expr)))
     }
 
     // var_decl         -> "var" IDENTIFIER ( "=" expression )? ";" ;
@@ -215,7 +215,7 @@ impl Parser {
 
         self.consume(Token::Semicolon)?;
 
-        return Ok(self.push_statement(Stmt::VarDecl { identifier, expr }));
+        Ok(self.push_statement(Stmt::VarDecl { identifier, expr }))
     }
 
     // function_decl    -> "function" IDENTIFIER "(" parameters? ")" block_stmt ;
@@ -242,11 +242,11 @@ impl Parser {
 
         let body = self.block_stmt()?;
 
-        return Ok(self.push_statement(Stmt::FunctionDecl {
+        Ok(self.push_statement(Stmt::FunctionDecl {
             identifier,
             args,
             body,
-        }));
+        }))
     }
 
     // block_stmt       -> "{" ( statement )* "}" ;
@@ -271,7 +271,7 @@ impl Parser {
             }
         }
 
-        return Ok(self.push_statement(Stmt::Block(statements)));
+        Ok(self.push_statement(Stmt::Block(statements)))
     }
 
     // if_stmt          -> "if" expression block_stmt
@@ -293,11 +293,11 @@ impl Parser {
             };
         }
 
-        return Ok(self.push_statement(Stmt::If {
+        Ok(self.push_statement(Stmt::If {
             cond,
             if_block,
             else_block,
-        }));
+        }))
     }
 
     // while_stmt       -> "while" expression block_stmt ;
@@ -306,7 +306,7 @@ impl Parser {
         let cond = self.expression()?;
         let block = self.block_stmt()?;
 
-        return Ok(self.push_statement(Stmt::While { cond, block }));
+        Ok(self.push_statement(Stmt::While { cond, block }))
     }
 
     // for_stmt         -> "for" (
@@ -363,7 +363,7 @@ impl Parser {
         statements.push(while_stmt);
         let final_stmt = self.push_statement(Stmt::Block(statements));
 
-        return Ok(final_stmt);
+        Ok(final_stmt)
     }
 
     // return_stmt      -> "return" expression? ";" ;
@@ -378,14 +378,14 @@ impl Parser {
 
         self.consume(Token::Semicolon)?;
 
-        return Ok(self.push_statement(Stmt::Return(expr)));
+        Ok(self.push_statement(Stmt::Return(expr)))
     }
 
     // expression   -> assignment ;
     fn expression(&mut self) -> Result<usize, ParseError> {
         let expr = self.assignement()?;
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // assignment   -> IDENTIFIER "=" assignment | logic_or ;
@@ -422,7 +422,7 @@ impl Parser {
             }));
         };
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // logic_or     -> logic_and ( "or" logic_and )* ;
@@ -437,7 +437,7 @@ impl Parser {
             expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // logic_and    -> equality ( "and" equality )* ;
@@ -452,7 +452,7 @@ impl Parser {
             expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // equality     -> comparison ( ( "!=" | "==" ) comparison )* ;
@@ -467,7 +467,7 @@ impl Parser {
             expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // comparison   -> term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
@@ -487,7 +487,7 @@ impl Parser {
             expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // term         -> factor ( ( "-" | "+" ) factor )* ;
@@ -502,7 +502,7 @@ impl Parser {
             expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // factor       -> unary ( ( "/" | "*" ) unary )* ;
@@ -517,7 +517,7 @@ impl Parser {
             expr = self.push_expression(Expr::Binary { lhs, rhs, op });
         }
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     // unary        -> ("not" | "-") unary
@@ -530,7 +530,7 @@ impl Parser {
             return Ok(self.push_expression(Expr::Unary { rhs, op }));
         }
 
-        return self.call();
+        self.call()
     }
 
     // call         -> primary ( "(" arguments? ")" "* ;
@@ -539,28 +539,24 @@ impl Parser {
         let start_index = self.current_index;
         let expr = self.primary()?;
 
-        loop {
-            if self.matches(Token::OpenParen) {
-                let callee = expr;
+        if self.matches(Token::OpenParen) {
+            let callee = expr;
 
-                match &self.expressions[callee] {
-                    Expr::Identifier(identifier) => {
-                        return Ok(self.finish_call(identifier.clone())?);
-                    }
-                    _ => {
-                        return Err(ParseError::UnexpectedToken {
-                            expected: Token::Identifier("".to_string()),
-                            found: self.tokens[start_index].clone(),
-                            position: start_index,
-                        });
-                    }
-                };
-            } else {
-                break;
-            }
+            match &self.expressions[callee] {
+                Expr::Identifier(identifier) => {
+                    return self.finish_call(identifier.clone());
+                }
+                _ => {
+                    return Err(ParseError::UnexpectedToken {
+                        expected: Token::Identifier("".to_string()),
+                        found: self.tokens[start_index].clone(),
+                        position: start_index,
+                    });
+                }
+            };
         }
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     fn finish_call(&mut self, callee: String) -> Result<usize, ParseError> {
@@ -580,7 +576,7 @@ impl Parser {
 
         _ = self.consume(Token::CloseParen)?;
 
-        return Ok(self.push_expression(Expr::Call { callee, arguments }));
+        Ok(self.push_expression(Expr::Call { callee, arguments }))
     }
 
     // primary      -> NUMBER | STRING | "true" | "false" | "nil"
@@ -603,14 +599,14 @@ impl Parser {
 
         self.advance();
 
-        return Ok(expr);
+        Ok(expr)
     }
 
     fn grouping(&mut self) -> Result<usize, ParseError> {
         self.consume(Token::OpenParen)?;
         let expr = self.expression()?;
         self.expect(Token::CloseParen)?;
-        return Ok(expr);
+        Ok(expr)
     }
 
     fn identifier(&mut self) -> Result<String, ParseError> {
@@ -628,7 +624,7 @@ impl Parser {
             return true;
         }
 
-        return false;
+        false
     }
 
     fn matches_any(&mut self, tokens: &[Token]) -> bool {
@@ -638,11 +634,11 @@ impl Parser {
             }
         }
 
-        return false;
+        false
     }
 
     fn check(&self, token: Token) -> bool {
-        return variant_eq(self.current_token(), &token);
+        variant_eq(self.current_token(), &token)
     }
 
     fn consume(&mut self, expected: Token) -> Result<&Token, ParseError> {
@@ -650,11 +646,11 @@ impl Parser {
             return Ok(self.advance());
         }
 
-        return Err(ParseError::UnexpectedToken {
+        Err(ParseError::UnexpectedToken {
             expected: expected.clone(),
             found: self.current_token().clone(),
             position: self.current_index,
-        });
+        })
     }
 
     fn expect(&mut self, expected: Token) -> Result<(), ParseError> {
@@ -666,15 +662,15 @@ impl Parser {
             });
         }
 
-        return Ok(());
+        Ok(())
     }
 
     fn current_token(&self) -> &Token {
-        return &self.tokens[self.current_index];
+        &self.tokens[self.current_index]
     }
 
     fn previous_token(&self) -> &Token {
-        return &self.tokens[self.current_index - 1];
+        &self.tokens[self.current_index - 1]
     }
 
     fn advance(&mut self) -> &Token {
@@ -683,19 +679,19 @@ impl Parser {
             return self.previous_token();
         }
 
-        return self.current_token();
+        self.current_token()
     }
 
     fn push_statement(&mut self, stmt: Stmt) -> usize {
         let index = self.statements.len();
         self.statements.push(stmt);
-        return index;
+        index
     }
 
     fn push_expression(&mut self, expr: Expr) -> usize {
         let index = self.expressions.len();
         self.expressions.push(expr);
-        return index;
+        index
     }
 }
 

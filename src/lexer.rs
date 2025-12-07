@@ -37,7 +37,7 @@ pub fn tokenize(src: &str) -> (Vec<Token>, Vec<LexError>) {
 
     tokens.push(Token::EOF);
 
-    return (tokens, errors);
+    (tokens, errors)
 }
 
 struct Lexer<'a> {
@@ -60,7 +60,7 @@ impl<'a> Lexer<'a> {
             return Ok(two_char);
         }
 
-        return Ok(one_char);
+        Ok(one_char)
     }
 
     fn identifier(&mut self, curr: char) -> Result<Token, LexError> {
@@ -71,13 +71,9 @@ impl<'a> Lexer<'a> {
             });
         }
 
-        loop {
-            if let Some(c) = self.peek() {
-                if c.is_alphanumeric() || c == '_' {
-                    self.advance();
-                } else {
-                    break;
-                }
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                self.advance();
             } else {
                 break;
             }
@@ -87,33 +83,33 @@ impl<'a> Lexer<'a> {
             return Ok(keyword.clone());
         }
 
-        return Ok(Token::Identifier(
+        Ok(Token::Identifier(
             self.src[self.start_index..self.current_index].to_string(),
-        ));
+        ))
     }
 
     fn number(&mut self) -> Result<Token, LexError> {
-        while self.peek().unwrap_or('\0').is_digit(10) {
+        while self.peek().unwrap_or('\0').is_ascii_digit() {
             self.advance();
         }
 
-        if self.peek().unwrap_or('\0') == '.' && self.peek_next().unwrap_or('\0').is_digit(10) {
+        if self.peek().unwrap_or('\0') == '.' && self.peek_next().unwrap_or('\0').is_ascii_digit() {
             self.advance();
 
-            while self.peek().unwrap_or('\0').is_digit(10) {
+            while self.peek().unwrap_or('\0').is_ascii_digit() {
                 self.advance();
             }
         }
 
         let str = &self.src[self.start_index..self.current_index];
 
-        return match str.parse::<f64>() {
+        match str.parse::<f64>() {
             Ok(number) => Ok(Token::Number(number)),
             Err(_) => Err(LexError::InvalidNumber {
                 text: str.to_string(),
                 position: self.start_index,
             }),
-        };
+        }
     }
 
     fn string(&mut self) -> Result<Token, LexError> {
@@ -152,13 +148,10 @@ impl<'a> Lexer<'a> {
                     if self.peek_next().unwrap_or('\0') == '/' {
                         self.consume();
                         self.consume();
-                        loop {
-                            match self.peek() {
-                                Some(c) => match c {
-                                    '\n' => break,
-                                    _ => self.consume(),
-                                },
-                                None => break,
+                        while let Some(c) = self.peek() {
+                            match c {
+                                '\n' => break,
+                                _ => self.consume(),
                             }
                         }
                     } else {
@@ -183,7 +176,7 @@ impl<'a> Lexer<'a> {
 
         self.current_index += char?.len_utf8();
 
-        return char;
+        char
     }
 
     fn consume(&mut self) {
@@ -263,7 +256,7 @@ impl<'a> Iterator for Lexer<'a> {
                     }
                 }
                 '"' => Some(self.string()),
-                '0'..'9' => Some(self.number()),
+                '0'..='9' => Some(self.number()),
                 _ => Some(self.identifier(char)),
             }
         } else {

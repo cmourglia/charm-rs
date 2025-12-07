@@ -16,7 +16,7 @@ pub enum RuntimeError {
 
 impl From<io::Error> for RuntimeError {
     fn from(error: io::Error) -> Self {
-        return RuntimeError::IoError(error.to_string());
+        RuntimeError::IoError(error.to_string())
     }
 }
 
@@ -25,7 +25,7 @@ enum FlowControl {
     Return(Value),
 }
 
-type NativeFunction = fn(&mut Context, &[Value]) -> Result<FlowControl, RuntimeError>;
+type NativeFunction = fn(&mut Context<'_>, &[Value]) -> Result<FlowControl, RuntimeError>;
 
 #[derive(Debug, PartialEq, Clone)]
 struct UserFunction {
@@ -83,7 +83,7 @@ struct FrameStack {
 
 impl FrameStack {
     pub fn new() -> Self {
-        return FrameStack { frames: vec![] };
+        FrameStack { frames: vec![] }
     }
 
     pub fn push_frame(&mut self) {
@@ -99,12 +99,12 @@ impl FrameStack {
     // FIXME: Should this return a ref or a clone of the value ?
     pub fn get_variable(&self, name: &str) -> Result<Value, RuntimeError> {
         for frame in self.frames.iter().rev() {
-            if let Some(value) = frame.variables.get(&name.to_string()) {
+            if let Some(value) = frame.variables.get(name) {
                 return Ok(value.clone());
             }
         }
 
-        return Err(RuntimeError::VariableNotDeclared(name.to_string()));
+        Err(RuntimeError::VariableNotDeclared(name.to_string()))
     }
 
     pub fn declare_variable(&mut self, name: &str, value: Value) {
@@ -117,13 +117,13 @@ impl FrameStack {
 
     pub fn set_variable(&mut self, name: &str, value: Value) -> Result<(), RuntimeError> {
         for frame in self.frames.iter_mut().rev() {
-            if let Some(v) = frame.variables.get_mut(&name.to_string()) {
+            if let Some(v) = frame.variables.get_mut(name) {
                 *v = value;
                 return Ok(());
             }
         }
 
-        return Err(RuntimeError::VariableNotDeclared(name.to_string()));
+        Err(RuntimeError::VariableNotDeclared(name.to_string()))
     }
 }
 
@@ -136,24 +136,30 @@ pub struct Context<'a> {
     expr_pool: &'a [Expr],
 }
 
+impl<'a> Default for Context<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> Context<'a> {
     pub fn new() -> Self {
-        return Self::with_writer(Box::new(std::io::stdout()));
+        Self::with_writer(Box::new(std::io::stdout()))
     }
 
     #[allow(unused)]
     pub fn with_writer(writer: Box<dyn std::io::Write>) -> Context<'a> {
-        return Context {
+        Context {
             writer,
             frames: FrameStack::new(),
             epoch: std::time::Instant::now(),
             stmt_pool: Default::default(),
             expr_pool: Default::default(),
-        };
+        }
     }
 }
 
-fn native_print(ctx: &mut Context, values: &[Value]) -> Result<FlowControl, RuntimeError> {
+fn native_print(ctx: &mut Context<'_>, values: &[Value]) -> Result<FlowControl, RuntimeError> {
     let mut first = true;
 
     for v in values {
@@ -172,17 +178,17 @@ fn native_print(ctx: &mut Context, values: &[Value]) -> Result<FlowControl, Runt
         first = false;
     }
 
-    writeln!(ctx.writer, "")?;
+    writeln!(ctx.writer)?;
 
-    return Ok(FlowControl::None);
+    Ok(FlowControl::None)
 }
 
-fn native_time(ctx: &mut Context, _: &[Value]) -> Result<FlowControl, RuntimeError> {
+fn native_time(ctx: &mut Context<'_>, _: &[Value]) -> Result<FlowControl, RuntimeError> {
     let now = std::time::Instant::now();
 
     let elapsed = now.duration_since(ctx.epoch).as_nanos() as f64;
 
-    return Ok(FlowControl::Return(Value::Number(elapsed)));
+    Ok(FlowControl::Return(Value::Number(elapsed)))
 }
 
 pub fn treewalk_interpret(prg: &Program) {
@@ -215,7 +221,7 @@ fn interpret_with_context<'a>(ctx: &'a mut Context<'a>, prg: &'a Program) {
     }
 }
 
-fn interpret_stmt(ctx: &mut Context, stmt: usize) -> Result<FlowControl, RuntimeError> {
+fn interpret_stmt(ctx: &mut Context<'_>, stmt: usize) -> Result<FlowControl, RuntimeError> {
     let result = match &ctx.stmt_pool[stmt] {
         Stmt::Expr(expr) => {
             interpret_expr(ctx, *expr)?;
@@ -259,7 +265,7 @@ fn interpret_stmt(ctx: &mut Context, stmt: usize) -> Result<FlowControl, Runtime
         } => {
             let function = Value::UserFunction(UserFunction {
                 args: args.clone(),
-                body: body.clone(),
+                body: *body,
             });
 
             ctx.frames.declare_variable(identifier, function);
@@ -272,15 +278,13 @@ fn interpret_stmt(ctx: &mut Context, stmt: usize) -> Result<FlowControl, Runtime
             if_block,
             else_block,
         } => {
-            let flow_control = if interpret_expr(ctx, *cond)?.is_truthy() {
+            if interpret_expr(ctx, *cond)?.is_truthy() {
                 interpret_stmt(ctx, *if_block)?
             } else if let Some(else_block) = else_block {
                 interpret_stmt(ctx, *else_block)?
             } else {
                 FlowControl::None
-            };
-
-            flow_control
+            }
         }
 
         Stmt::While { cond, block } => interpret_while(ctx, *cond, *block)?,
@@ -294,33 +298,33 @@ fn interpret_stmt(ctx: &mut Context, stmt: usize) -> Result<FlowControl, Runtime
         }
     };
 
-    return Ok(result);
+    Ok(result)
 }
 
 fn interpret_while(
-    ctx: &mut Context,
+    ctx: &mut Context<'_>,
     cond: usize,
     body: usize,
 ) -> Result<FlowControl, RuntimeError> {
     while interpret_expr(ctx, cond)?.is_truthy() {
         match interpret_stmt(ctx, body)? {
-            FlowControl::None => continue,
+            FlowControl::None => {}
             // TODO: Handle continue
             // TODO: Handle break
             FlowControl::Return(val) => return Ok(FlowControl::Return(val)),
         }
     }
 
-    return Ok(FlowControl::None);
+    Ok(FlowControl::None)
 }
 
-fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError> {
+fn interpret_expr(ctx: &mut Context<'_>, expr: usize) -> Result<Value, RuntimeError> {
     match &ctx.expr_pool[expr] {
         Expr::Number(n) => Ok(Value::Number(*n)),
         Expr::Boolean(b) => Ok(Value::Boolean(*b)),
         Expr::String(_) => todo!(),
 
-        Expr::Identifier(name) => Ok(ctx.frames.get_variable(&name)?),
+        Expr::Identifier(name) => Ok(ctx.frames.get_variable(name)?),
 
         Expr::Unary { rhs, op } => Ok(unary_expr(ctx, *rhs, op)?),
 
@@ -336,7 +340,7 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
             }
             let new_value = interpret_expr(ctx, *value)?;
 
-            let old_value = ctx.frames.get_variable(&identifier)?;
+            let old_value = ctx.frames.get_variable(identifier)?;
 
             if old_value != Value::Nil && !variant_eq(&old_value, &new_value) {
                 return Err(RuntimeError::TypeMismatch {
@@ -345,13 +349,13 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
                 });
             }
 
-            ctx.frames.set_variable(&identifier, new_value.clone())?;
+            ctx.frames.set_variable(identifier, new_value.clone())?;
 
             Ok(new_value)
         }
 
         Expr::Call { callee, arguments } => {
-            let function = ctx.frames.get_variable(&callee)?;
+            let function = ctx.frames.get_variable(callee)?;
 
             let mut args = Vec::new();
             for arg in arguments {
@@ -362,22 +366,22 @@ fn interpret_expr(ctx: &mut Context, expr: usize) -> Result<Value, RuntimeError>
 
             let result = match &function {
                 Value::NativeFunction(function) => function(ctx, &args)?,
-                Value::UserFunction(function) => call_user_function(ctx, &function, &args)?,
-                _ => return Err(RuntimeError::InvalidType(callee.to_string())),
+                Value::UserFunction(function) => call_user_function(ctx, function, &args)?,
+                _ => return Err(RuntimeError::InvalidType(callee.clone())),
             };
 
             ctx.frames.pop_frame();
 
             match result {
                 FlowControl::Return(retval) => Ok(retval),
-                _ => Ok(Value::Nil),
+                FlowControl::None => Ok(Value::Nil),
             }
         }
     }
 }
 
 fn call_user_function(
-    ctx: &mut Context,
+    ctx: &mut Context<'_>,
     function: &UserFunction,
     params: &[Value],
 ) -> Result<FlowControl, RuntimeError> {
@@ -387,16 +391,16 @@ fn call_user_function(
         return Err(RuntimeError::InvalidNumberOfParameters);
     }
 
-    for i in 0..arity {
+    for (i, param) in params.iter().enumerate() {
         ctx.frames
-            .declare_variable(&function.args[i], params[i].clone());
+            .declare_variable(&function.args[i], param.clone());
     }
 
-    return interpret_stmt(ctx, function.body);
+    interpret_stmt(ctx, function.body)
 }
 
 fn binary_expr(
-    ctx: &mut Context,
+    ctx: &mut Context<'_>,
     lhs: usize,
     rhs: usize,
     op: &Token,
@@ -418,47 +422,47 @@ fn binary_expr(
     }
 }
 
-fn add(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn add(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs + rhs)),
-        _ => todo!(),
+        _ => unreachable!(),
     }
 }
 
-fn sub(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn sub(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs - rhs)),
-        _ => todo!(),
+        _ => unreachable!(),
     }
 }
 
-fn mul(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn mul(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs * rhs)),
-        _ => todo!(),
+        _ => unreachable!(),
     }
 }
 
-fn div(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn div(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
     match (lhs, rhs) {
         (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs / rhs)),
-        _ => todo!(),
+        _ => unreachable!(),
     }
 }
 
-fn and(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn and(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
 
     if let Value::Boolean(lhs) = lhs {
@@ -476,7 +480,7 @@ fn and(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError>
     todo!();
 }
 
-fn or(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn or(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
 
     if let Value::Boolean(lhs) = lhs {
@@ -494,7 +498,7 @@ fn or(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> 
     todo!();
 }
 
-fn lt(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn lt(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -504,7 +508,7 @@ fn lt(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> 
     }
 }
 
-fn le(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn le(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -514,7 +518,7 @@ fn le(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> 
     }
 }
 
-fn gt(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn gt(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -524,7 +528,7 @@ fn gt(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> 
     }
 }
 
-fn ge(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn ge(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
@@ -534,21 +538,21 @@ fn ge(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> 
     }
 }
 
-fn eq(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn eq(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
-    return Ok(Value::Boolean(lhs == rhs));
+    Ok(Value::Boolean(lhs == rhs))
 }
 
-fn neq(ctx: &mut Context, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
+fn neq(ctx: &mut Context<'_>, lhs: usize, rhs: usize) -> Result<Value, RuntimeError> {
     let lhs = interpret_expr(ctx, lhs)?;
     let rhs = interpret_expr(ctx, rhs)?;
 
-    return Ok(Value::Boolean(lhs != rhs));
+    Ok(Value::Boolean(lhs != rhs))
 }
 
-fn unary_expr(ctx: &mut Context, right: usize, op: &Token) -> Result<Value, RuntimeError> {
+fn unary_expr(ctx: &mut Context<'_>, right: usize, op: &Token) -> Result<Value, RuntimeError> {
     let right_value = interpret_expr(ctx, right)?;
 
     match op {
